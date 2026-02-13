@@ -114,6 +114,61 @@ interface FlightRiskMetric {
   label: 'low' | 'medium' | 'high' | 'triggered'
 }
 
+interface ScoreTier {
+  label: 'Starter' | 'Bronze' | 'Silver' | 'Gold'
+  points: number
+  tone: string
+}
+
+interface OnboardingStep {
+  title: string
+  body: string
+}
+
+const SCORE_TIERS: ScoreTier[] = [
+  { label: 'Starter', points: 0, tone: 'text-slate-700' },
+  { label: 'Bronze', points: 80, tone: 'text-amber-700' },
+  { label: 'Silver', points: 140, tone: 'text-sky-700' },
+  { label: 'Gold', points: 220, tone: 'text-emerald-700' },
+]
+
+const ONBOARDING_STEPS: OnboardingStep[] = [
+  {
+    title: 'Core Objective',
+    body: "You are trying to maximize Integration Score, not just survive. Keep rows in the integration band for as many turns as possible.",
+  },
+  {
+    title: 'How You Score',
+    body: 'Each turn, every row in the 30%-70% minority range gives points. Streaking integrated turns increases your total quickly.',
+  },
+  {
+    title: 'What Causes Collapse',
+    body: 'When minority share crosses the tipping threshold, flight can trigger. Watch the Flight Risk meter and avoid threshold jumps.',
+  },
+  {
+    title: 'What Counts As A Win',
+    body: 'Use score tiers: Bronze 80+, Silver 140+, Gold 220+. Try to hit Silver while preventing lock spirals and full segregation.',
+  },
+]
+
+const ONBOARDING_STORAGE_KEY = 'block-burb-onboarding-v1'
+
+const getScoreTier = (score: number): ScoreTier =>
+  SCORE_TIERS.reduce((best, tier) => (score >= tier.points ? tier : best), SCORE_TIERS[0])
+
+const getNextScoreTier = (score: number): ScoreTier | null =>
+  SCORE_TIERS.find((tier) => tier.points > score) ?? null
+
+const getScoreProgress = (score: number, nextTier: ScoreTier | null): number => {
+  if (nextTier === null) {
+    return 100
+  }
+
+  const previousTier = SCORE_TIERS.reduce((best, tier) => (tier.points < nextTier.points ? tier : best), SCORE_TIERS[0])
+  const span = Math.max(1, nextTier.points - previousTier.points)
+  return Math.max(0, Math.min(100, Math.round(((score - previousTier.points) / span) * 100)))
+}
+
 const isHouseholdCell = (cell: Cell): cell is Tile =>
   cell !== null && cell.kind === 'household' && cell.color !== null
 
@@ -319,6 +374,8 @@ function App() {
   const [game, setGame] = useState(() => createInitialState(DEFAULT_CONFIG))
   const [showSettings, setShowSettings] = useState(false)
   const [showLockHelp, setShowLockHelp] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [onboardingStepIndex, setOnboardingStepIndex] = useState(0)
   const touchStartRef = useRef<TouchPoint | null>(null)
 
   const handleMove = useCallback(
@@ -327,6 +384,13 @@ function App() {
     },
     [config],
   )
+
+  useEffect(() => {
+    const hasSeen = window.localStorage.getItem(ONBOARDING_STORAGE_KEY)
+    if (!hasSeen) {
+      setShowOnboarding(true)
+    }
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -386,6 +450,25 @@ function App() {
     setGame(createInitialState(config))
   }
 
+  const openOnboarding = (): void => {
+    setOnboardingStepIndex(0)
+    setShowOnboarding(true)
+  }
+
+  const closeOnboarding = (): void => {
+    setShowOnboarding(false)
+    setOnboardingStepIndex(0)
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, '1')
+  }
+
+  const nextOnboardingStep = (): void => {
+    setOnboardingStepIndex((previous) => Math.min(previous + 1, ONBOARDING_STEPS.length - 1))
+  }
+
+  const previousOnboardingStep = (): void => {
+    setOnboardingStepIndex((previous) => Math.max(previous - 1, 0))
+  }
+
   const endNow = (): void => {
     setGame((previous) => endSession(previous))
   }
@@ -406,6 +489,59 @@ function App() {
   )
 
   const activeBoardClass = game.summary.flightCount > 0 ? 'board-flash' : ''
+  const currentTier = useMemo(() => getScoreTier(game.totalScore), [game.totalScore])
+  const nextTier = useMemo(() => getNextScoreTier(game.totalScore), [game.totalScore])
+  const scoreProgress = useMemo(() => getScoreProgress(game.totalScore, nextTier), [game.totalScore, nextTier])
+  const activeOnboardingStep = ONBOARDING_STEPS[onboardingStepIndex]
+  const onboardingModal = showOnboarding ? (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 px-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/60 bg-white p-4 shadow-2xl">
+        <p className="text-[11px] uppercase tracking-[0.16em] text-slate-500">
+          How To Play ({onboardingStepIndex + 1}/{ONBOARDING_STEPS.length})
+        </p>
+        <h2 className="mt-1 text-xl font-semibold text-slate-900">{activeOnboardingStep.title}</h2>
+        <p className="mt-2 text-sm text-slate-700">{activeOnboardingStep.body}</p>
+
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={closeOnboarding}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700"
+          >
+            Skip Tutorial
+          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={previousOnboardingStep}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 disabled:opacity-40"
+              disabled={onboardingStepIndex === 0}
+            >
+              Back
+            </button>
+            {onboardingStepIndex < ONBOARDING_STEPS.length - 1 ? (
+              <button
+                type="button"
+                onClick={nextOnboardingStep}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
+              >
+                Next
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={closeOnboarding}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
+              >
+                Start Playing
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null
 
   if (game.gameOver) {
     return (
@@ -434,6 +570,14 @@ function App() {
             </div>
           </div>
 
+          <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+            <p className="text-xs text-slate-600">
+              Outcome tier: <span className={`font-semibold ${currentTier.tone}`}>{currentTier.label}</span>. Win
+              target for class discussion: reach at least <span className="font-semibold">Silver (140+)</span> while
+              avoiding lock/flight cascades.
+            </p>
+          </div>
+
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div>
               <p className="mb-2 text-sm font-medium text-slate-700">Final map</p>
@@ -457,6 +601,7 @@ function App() {
             Start New Session
           </button>
         </section>
+        {onboardingModal}
       </main>
     )
   }
@@ -470,13 +615,22 @@ function App() {
             <h1 className="mt-1 text-2xl font-semibold text-slate-900">Block 'Burb</h1>
             <p className="mt-1 text-xs text-slate-600">Swipe on the board or use arrow controls.</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowSettings((previous) => !previous)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm"
-          >
-            {showSettings ? 'Close' : 'Settings'}
-          </button>
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={openOnboarding}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm"
+            >
+              How To Play
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSettings((previous) => !previous)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm"
+            >
+              {showSettings ? 'Close' : 'Settings'}
+            </button>
+          </div>
         </header>
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-center">
@@ -505,6 +659,24 @@ function App() {
             <p className="text-base font-semibold text-slate-800">{lockedHouseholds}</p>
           </div>
         </div>
+
+        <section className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Objective</p>
+            <span className={`text-sm font-semibold ${currentTier.tone}`}>Tier: {currentTier.label}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-700">
+            Win by maximizing Integration Score. Target: Bronze 80+, Silver 140+, Gold 220+.
+          </p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+            <div className="h-full bg-sky-500" style={{ width: `${scoreProgress}%` }} />
+          </div>
+          <p className="mt-1 text-[11px] text-slate-600">
+            {nextTier === null
+              ? 'Gold tier reached.'
+              : `${Math.max(0, nextTier.points - game.totalScore)} points to ${nextTier.label}.`}
+          </p>
+        </section>
 
         {game.summary.segregationWarning ? (
           <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -882,6 +1054,7 @@ function App() {
           </p>
         </footer>
       </section>
+      {onboardingModal}
     </main>
   )
 }
