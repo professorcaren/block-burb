@@ -1,0 +1,16 @@
+.DS_Store
+.pnpm-store/
+skills/
+
+node_modules/
+dist/
+build/
+.parcel-cache/
+
+*.log
+
+block-burb-app/node_modules/
+block-burb-app/dist/
+block-burb-app/bundle.html
+block-burb-app/.parcel-cache/
+block-burb-app/.vite/
