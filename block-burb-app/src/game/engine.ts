@@ -55,6 +55,7 @@ const createHousehold = (color: HouseholdColor): Tile => ({
   color,
   locked: false,
   mergedThisTurn: false,
+  isolationTurns: 0,
 })
 
 const createMergeResult = (a: Tile, b: Tile): Tile => {
@@ -65,6 +66,7 @@ const createMergeResult = (a: Tile, b: Tile): Tile => {
       color: null,
       locked: false,
       mergedThisTurn: true,
+      isolationTurns: 0,
     }
   }
 
@@ -74,6 +76,7 @@ const createMergeResult = (a: Tile, b: Tile): Tile => {
     color: null,
     locked: false,
     mergedThisTurn: true,
+    isolationTurns: 0,
   }
 }
 
@@ -472,7 +475,7 @@ const isBoardSegregated = (board: Board): boolean => {
   return hasBlue && hasOrange
 }
 
-const recomputeLocks = (board: Board): void => {
+const recomputeLocks = (board: Board, config: GameConfig): void => {
   const size = board.length
 
   for (let row = 0; row < size; row += 1) {
@@ -498,7 +501,14 @@ const recomputeLocks = (board: Board): void => {
         }
       }
 
-      tile.locked = rowSameColor === 1 && colSameColor === 1
+      const isolatedNow = rowSameColor === 1 && colSameColor === 1
+      if (isolatedNow) {
+        tile.isolationTurns += 1
+      } else {
+        tile.isolationTurns = 0
+      }
+
+      tile.locked = isolatedNow && tile.isolationTurns >= config.isolationLockDelayTurns
     }
   }
 }
@@ -534,6 +544,23 @@ const spawnOneHousehold = (board: Board, config: GameConfig, turn: number): bool
   const color: HouseholdColor = Math.random() < orangeShare ? 'orange' : 'blue'
   board[target.row][target.col] = createHousehold(color)
   return true
+}
+
+const spawnHouseholdsForTurn = (board: Board, config: GameConfig, turn: number): number => {
+  const targetSpawns = turn <= config.earlySpawnTurns ? config.earlySpawnPerTurn : config.spawnPerTurn
+  const lowSpaceCutoff = Math.max(2, Math.floor(board.length / 2))
+  const spawnCap = emptyCells(board).length <= lowSpaceCutoff ? 1 : targetSpawns
+
+  let spawned = 0
+  for (let i = 0; i < spawnCap; i += 1) {
+    const created = spawnOneHousehold(board, config, turn)
+    if (!created) {
+      break
+    }
+    spawned += 1
+  }
+
+  return spawned
 }
 
 const isFullyLocked = (board: Board): boolean => {
@@ -579,7 +606,7 @@ export const createInitialState = (config: GameConfig): GameState => {
     }
   }
 
-  recomputeLocks(board)
+  recomputeLocks(board, config)
 
   return {
     board,
@@ -617,13 +644,13 @@ export const applyTurn = (state: GameState, direction: Direction, config: GameCo
     }
   }
 
-  recomputeLocks(board)
+  recomputeLocks(board, config)
   const flightCount = applyFlight(board, config)
-  recomputeLocks(board)
+  recomputeLocks(board, config)
 
   const turn = state.turn + 1
-  const spawned = spawnOneHousehold(board, config, turn)
-  recomputeLocks(board)
+  const spawnedCount = spawnHouseholdsForTurn(board, config, turn)
+  recomputeLocks(board, config)
 
   const rowsIntegrated = integrationRows(board, config)
   const pointsGained = rowsIntegrated * config.integrationPointsPerRow
@@ -648,7 +675,7 @@ export const applyTurn = (state: GameState, direction: Direction, config: GameCo
       integrationRows: rowsIntegrated,
       pointsGained,
       segregationWarning,
-      spawned,
+      spawned: spawnedCount > 0,
     },
   }
 }

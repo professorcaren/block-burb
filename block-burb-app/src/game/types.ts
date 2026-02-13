@@ -16,6 +16,7 @@ export interface Tile {
   color: HouseholdColor | null
   locked: boolean
   mergedThisTurn: boolean
+  isolationTurns: number
 }
 
 export type Cell = Tile | null
@@ -37,6 +38,10 @@ export interface GameConfig {
   initialTiles: number
   spawnRatio: SpawnRatio
   spawnRatioShiftPerTurn: number
+  spawnPerTurn: number
+  earlySpawnPerTurn: number
+  earlySpawnTurns: number
+  isolationLockDelayTurns: number
   tippingThreshold: number
   tippingUnit: TippingUnit
   flightMode: FlightMode
