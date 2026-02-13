@@ -176,6 +176,7 @@ function App() {
   const [draftConfig, setDraftConfig] = useState<GameConfig>(DEFAULT_CONFIG)
   const [game, setGame] = useState(() => createInitialState(DEFAULT_CONFIG))
   const [showSettings, setShowSettings] = useState(false)
+  const [showLockHelp, setShowLockHelp] = useState(false)
   const touchStartRef = useRef<TouchPoint | null>(null)
 
   const handleMove = useCallback(
@@ -253,6 +254,11 @@ function App() {
     () => generateEquilibriumMap(game.board.length, counts.blue, counts.orange),
     [counts.blue, counts.orange, game.board.length],
   )
+  const lockedHouseholds = useMemo(
+    () =>
+      game.board.flat().filter((tile) => tile !== null && tile.kind === 'household' && tile.locked).length,
+    [game.board],
+  )
 
   const activeBoardClass = game.summary.flightCount > 0 ? 'board-flash' : ''
 
@@ -328,14 +334,18 @@ function App() {
           </button>
         </header>
 
-        <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-slate-100 px-2 py-2">
             <p className="text-[10px] uppercase text-slate-500">Turn</p>
             <p className="text-base font-semibold text-slate-800">{game.turn}</p>
           </div>
           <div className="rounded-lg bg-slate-100 px-2 py-2">
-            <p className="text-[10px] uppercase text-slate-500">Score</p>
+            <p className="text-[10px] uppercase text-slate-500">Total Score</p>
             <p className="text-base font-semibold text-slate-800">{game.totalScore}</p>
+          </div>
+          <div className="rounded-lg bg-slate-100 px-2 py-2">
+            <p className="text-[10px] uppercase text-slate-500">This Turn</p>
+            <p className="text-base font-semibold text-emerald-700">+{game.summary.pointsGained}</p>
           </div>
           <div className="rounded-lg bg-slate-100 px-2 py-2">
             <p className="text-[10px] uppercase text-slate-500">Flight</p>
@@ -345,11 +355,36 @@ function App() {
             <p className="text-[10px] uppercase text-slate-500">Integrated Rows</p>
             <p className="text-base font-semibold text-slate-800">{game.summary.integrationRows}</p>
           </div>
+          <div className="rounded-lg bg-slate-100 px-2 py-2">
+            <p className="text-[10px] uppercase text-slate-500">Locked Tiles</p>
+            <p className="text-base font-semibold text-slate-800">{lockedHouseholds}</p>
+          </div>
         </div>
 
         {game.summary.segregationWarning ? (
           <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             Warning: board currently segregated. Play can continue.
+          </p>
+        ) : null}
+
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-xs text-slate-700">
+            Scoring band: keep row minority share between {Math.round(config.integrationBand.min * 100)}% and{' '}
+            {Math.round(config.integrationBand.max * 100)}%.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowLockHelp((previous) => !previous)}
+            className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700"
+          >
+            {showLockHelp ? 'Hide Lock Rule' : 'Why Locks?'}
+          </button>
+        </div>
+
+        {showLockHelp ? (
+          <p className="mt-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+            {lockIcon} A household locks when it is the only tile of its color in both its row and column. Locked
+            tiles do not move until a same-color household enters that row or column.
           </p>
         ) : null}
 
@@ -379,6 +414,11 @@ function App() {
                   <div
                     key={cell.id}
                     className={`tile-pop relative flex aspect-square items-center justify-center rounded-lg border text-sm font-bold ${visual.classes}`}
+                    aria-label={
+                      cell.kind === 'household' && cell.locked
+                        ? 'Locked household. It cannot move until a same-color tile enters this row or column.'
+                        : undefined
+                    }
                   >
                     <span>{visual.label}</span>
                     {cell.locked ? (
@@ -394,7 +434,8 @@ function App() {
         <DirectionPad onMove={handleMove} />
 
         <div className="mt-2 text-center text-[11px] text-slate-500">
-          Last move: {game.summary.moved ? `${game.summary.merges} merges` : 'no change'} • {game.summary.spawned ? 'spawned' : 'no spawn'}
+          Last move: {game.summary.moved ? `${game.summary.merges} merges` : 'no change'} •{' '}
+          {game.summary.spawned ? 'spawned' : 'no spawn'} • +{game.summary.pointsGained} points
         </div>
 
         <div className="mt-3 flex gap-2">
@@ -596,11 +637,22 @@ function App() {
           </section>
         ) : null}
 
-        <footer className="mt-4 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-[0.14em] text-slate-500">
-          <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">B = Majority Household</div>
-          <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">O = Minority Household</div>
-          <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">G = Gated Community</div>
-          <div className="rounded-lg border border-slate-200 bg-white px-2 py-2">C = Community Center</div>
+        <footer className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-700">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Legend + Rules</p>
+          <p>
+            <span className="font-semibold text-[#1f5ea8]">B</span> Majority household |{' '}
+            <span className="font-semibold text-[#d97a2f]">O</span> Minority household
+          </p>
+          <p>
+            <span className="font-semibold text-[#1a2f57]">G</span> Gated community (stable, low reward) |{' '}
+            <span className="font-semibold text-[#6f3a8a]">C</span> Community center
+          </p>
+          <p>
+            {lockIcon} Locked = isolated in row and column. Cannot move until same-color support appears.
+          </p>
+          <p>
+            Score each turn: +{config.integrationPointsPerRow} for every row in the integration band.
+          </p>
         </footer>
       </section>
     </main>
