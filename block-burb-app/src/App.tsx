@@ -100,6 +100,148 @@ const sanitizeConfig = (config: GameConfig): GameConfig => {
   }
 }
 
+interface RowMetric {
+  minorityShare: number
+  households: number
+  integrated: boolean
+}
+
+interface FlightRiskMetric {
+  maxMinorityShare: number
+  unitsOverThreshold: number
+  totalUnits: number
+  riskRatio: number
+  label: 'low' | 'medium' | 'high' | 'triggered'
+}
+
+const isHouseholdCell = (cell: Cell): cell is Tile =>
+  cell !== null && cell.kind === 'household' && cell.color !== null
+
+const minorityShareForCells = (cells: Cell[]): { share: number; households: number } => {
+  let minority = 0
+  let households = 0
+
+  for (const cell of cells) {
+    if (!isHouseholdCell(cell)) {
+      continue
+    }
+
+    households += 1
+    if (cell.color === 'orange') {
+      minority += 1
+    }
+  }
+
+  if (households === 0) {
+    return { share: 0, households: 0 }
+  }
+
+  return { share: minority / households, households }
+}
+
+const computeRowMetrics = (board: Board, config: GameConfig): RowMetric[] =>
+  board.map((row) => {
+    const metric = minorityShareForCells(row)
+    const integrated =
+      metric.households > 0 &&
+      metric.share >= config.integrationBand.min &&
+      metric.share <= config.integrationBand.max
+
+    return {
+      minorityShare: metric.share,
+      households: metric.households,
+      integrated,
+    }
+  })
+
+const computeUnitMinorityShares = (board: Board, unit: GameConfig['tippingUnit']): number[] => {
+  const size = board.length
+
+  if (unit === 'row') {
+    return board.map((row) => minorityShareForCells(row).share)
+  }
+
+  if (unit === 'column') {
+    return Array.from({ length: size }, (_, col) =>
+      minorityShareForCells(Array.from({ length: size }, (_, row) => board[row][col])).share,
+    )
+  }
+
+  const shares: number[] = []
+  for (let row = 0; row < size - 1; row += 1) {
+    for (let col = 0; col < size - 1; col += 1) {
+      const sector = [
+        board[row][col],
+        board[row + 1][col],
+        board[row][col + 1],
+        board[row + 1][col + 1],
+      ]
+      shares.push(minorityShareForCells(sector).share)
+    }
+  }
+  return shares
+}
+
+const computeFlightRisk = (board: Board, config: GameConfig): FlightRiskMetric => {
+  const shares = computeUnitMinorityShares(board, config.tippingUnit)
+  const maxMinorityShare = shares.length === 0 ? 0 : Math.max(...shares)
+  const unitsOverThreshold = shares.filter((share) => share > config.tippingThreshold).length
+  const riskRatio = Math.min(1, maxMinorityShare / Math.max(0.01, config.tippingThreshold))
+
+  let label: FlightRiskMetric['label'] = 'low'
+  if (unitsOverThreshold > 0) {
+    label = 'triggered'
+  } else if (riskRatio >= 0.85) {
+    label = 'high'
+  } else if (riskRatio >= 0.6) {
+    label = 'medium'
+  }
+
+  return {
+    maxMinorityShare,
+    unitsOverThreshold,
+    totalUnits: shares.length,
+    riskRatio,
+    label,
+  }
+}
+
+const computeLockRiskTileIds = (board: Board): Set<string> => {
+  const size = board.length
+  const risky = new Set<string>()
+
+  for (let row = 0; row < size; row += 1) {
+    for (let col = 0; col < size; col += 1) {
+      const tile = board[row][col]
+      if (!isHouseholdCell(tile) || tile.locked) {
+        continue
+      }
+
+      let rowSameColor = 0
+      let colSameColor = 0
+
+      for (let index = 0; index < size; index += 1) {
+        const rowTile = board[row][index]
+        const colTile = board[index][col]
+
+        if (isHouseholdCell(rowTile) && rowTile.color === tile.color) {
+          rowSameColor += 1
+        }
+
+        if (isHouseholdCell(colTile) && colTile.color === tile.color) {
+          colSameColor += 1
+        }
+      }
+
+      if (rowSameColor <= 2 && colSameColor <= 2) {
+        risky.add(tile.id)
+      }
+    }
+  }
+
+  return risky
+}
+
 const DirectionPad = ({ onMove }: { onMove: (direction: Direction) => void }) => (
   <div className="mx-auto mt-3 grid w-[180px] grid-cols-3 grid-rows-3 gap-2 sm:w-[220px]">
     <span />
@@ -254,6 +396,9 @@ function App() {
     () => generateEquilibriumMap(game.board.length, counts.blue, counts.orange),
     [counts.blue, counts.orange, game.board.length],
   )
+  const rowMetrics = useMemo(() => computeRowMetrics(game.board, config), [game.board, config])
+  const flightRisk = useMemo(() => computeFlightRisk(game.board, config), [game.board, config])
+  const lockRiskTileIds = useMemo(() => computeLockRiskTileIds(game.board), [game.board])
   const lockedHouseholds = useMemo(
     () =>
       game.board.flat().filter((tile) => tile !== null && tile.kind === 'household' && tile.locked).length,
@@ -367,6 +512,21 @@ function App() {
           </p>
         ) : null}
 
+        <div className="mt-2 flex items-center gap-2 text-xs">
+          {game.summary.integrationRows > 0 ? (
+            <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-1 font-medium text-emerald-800">
+              Integrated Block +{game.summary.pointsGained}
+            </span>
+          ) : (
+            <span className="rounded-full border border-slate-300 bg-white px-2 py-1 text-slate-600">
+              No integrated rows this turn
+            </span>
+          )}
+          <span className="rounded-full border border-blue-300 bg-blue-50 px-2 py-1 font-medium text-blue-900">
+            Streak {game.integrationStreak}
+          </span>
+        </div>
+
         <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
           <p className="text-xs text-slate-700">
             Scoring band: keep row minority share between {Math.round(config.integrationBand.min * 100)}% and{' '}
@@ -388,6 +548,59 @@ function App() {
           </p>
         ) : null}
 
+        <section className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">System Visibility</p>
+
+          <div className="mt-2 space-y-2">
+            {rowMetrics.map((row, index) => {
+              const percentage = Math.round(row.minorityShare * 100)
+              const barClass = row.integrated ? 'bg-emerald-500' : 'bg-slate-400'
+              return (
+                <div key={`row-metric-${index}`}>
+                  <div className="mb-1 flex items-center justify-between text-[11px] text-slate-700">
+                    <span>Row {index + 1}</span>
+                    <span>
+                      {row.households === 0 ? 'No households' : `${percentage}% minority`}
+                      {row.integrated ? ' • integrated' : ''}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                    <div className={`h-full ${barClass}`} style={{ width: `${percentage}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
+            <div className="mb-1 flex items-center justify-between text-[11px]">
+              <span className="font-medium text-slate-700">Flight Risk ({config.tippingUnit})</span>
+              <span className="font-semibold text-slate-800">
+                {Math.round(flightRisk.maxMinorityShare * 100)}% / {Math.round(config.tippingThreshold * 100)}%
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className={`h-full ${
+                  flightRisk.label === 'triggered'
+                    ? 'bg-red-500'
+                    : flightRisk.label === 'high'
+                      ? 'bg-amber-500'
+                      : flightRisk.label === 'medium'
+                        ? 'bg-yellow-500'
+                        : 'bg-emerald-500'
+                }`}
+                style={{ width: `${Math.round(flightRisk.riskRatio * 100)}%` }}
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-600">
+              {flightRisk.unitsOverThreshold > 0
+                ? `${flightRisk.unitsOverThreshold} / ${flightRisk.totalUnits} units above threshold`
+                : 'No units above threshold'}
+            </p>
+          </div>
+        </section>
+
         <div
           className={`mt-3 w-full rounded-xl border border-slate-200 bg-[#f3f6fb] p-2 ${activeBoardClass}`}
           onTouchStart={onTouchStart}
@@ -400,27 +613,38 @@ function App() {
           >
             {game.board.flatMap((row, rowIndex) =>
               row.map((cell, colIndex) => {
+                const rowIntegrated = rowMetrics[rowIndex]?.integrated
+                const rowGlowClass = rowIntegrated ? 'ring-1 ring-emerald-300' : ''
+
                 if (cell === null) {
                   return (
                     <div
                       key={`cell-${rowIndex}-${colIndex}`}
-                      className="aspect-square rounded-lg border border-slate-200 bg-white/70"
+                      className={`aspect-square rounded-lg border border-slate-200 bg-white/70 ${rowGlowClass}`}
                     />
                   )
                 }
 
                 const visual = tileDisplay(cell)
+                const lockRisk = lockRiskTileIds.has(cell.id) && !cell.locked
                 return (
                   <div
                     key={cell.id}
-                    className={`tile-pop relative flex aspect-square items-center justify-center rounded-lg border text-sm font-bold ${visual.classes}`}
+                    className={`tile-pop relative flex aspect-square items-center justify-center rounded-lg border text-sm font-bold ${visual.classes} ${rowGlowClass} ${
+                      lockRisk ? 'ring-2 ring-amber-300' : ''
+                    }`}
                     aria-label={
                       cell.kind === 'household' && cell.locked
                         ? 'Locked household. It cannot move until a same-color tile enters this row or column.'
-                        : undefined
+                        : lockRisk
+                          ? 'At risk of becoming locked soon.'
+                          : undefined
                     }
                   >
                     <span>{visual.label}</span>
+                    {lockRisk ? (
+                      <span className="absolute left-1 top-1 text-[10px] font-black text-amber-100">!</span>
+                    ) : null}
                     {cell.locked ? (
                       <span className="absolute bottom-1 right-1 text-[10px] text-white/90">{lockIcon}</span>
                     ) : null}
@@ -649,6 +873,9 @@ function App() {
           </p>
           <p>
             {lockIcon} Locked = isolated in row and column. Cannot move until same-color support appears.
+          </p>
+          <p>
+            Yellow ring + ! = at risk of locking soon.
           </p>
           <p>
             Score each turn: +{config.integrationPointsPerRow} for every row in the integration band.

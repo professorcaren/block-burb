@@ -586,6 +586,7 @@ export const createInitialState = (config: GameConfig): GameState => {
     turn: 0,
     totalScore: 0,
     integrationTurnsSurvived: 0,
+    integrationStreak: 0,
     gameOver: false,
     gameOverReason: null,
     summary: defaultSummary(),
@@ -637,6 +638,7 @@ export const applyTurn = (state: GameState, direction: Direction, config: GameCo
     turn,
     totalScore: state.totalScore + pointsGained,
     integrationTurnsSurvived: state.integrationTurnsSurvived + (rowsIntegrated > 0 ? 1 : 0),
+    integrationStreak: rowsIntegrated > 0 ? state.integrationStreak + 1 : 0,
     gameOver,
     gameOverReason: gameOver ? (fullyLocked ? 'fully_locked' : 'no_legal_moves') : null,
     summary: {

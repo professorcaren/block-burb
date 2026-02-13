@@ -63,6 +63,7 @@ export interface GameState {
   turn: number
   totalScore: number
   integrationTurnsSurvived: number
+  integrationStreak: number
   gameOver: boolean
   gameOverReason: GameOverReason | null
   summary: TurnSummary
