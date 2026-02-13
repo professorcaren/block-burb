@@ -1,7 +1,15 @@
-import { clamp01 } from '@/game/config'
-import type { Board, Coordinate, Direction, GameConfig, GameState, HouseholdColor, Tile, TurnSummary } from '@/game/types'
-
-const DIRECTIONS: Direction[] = ['up', 'down', 'left', 'right']
+import type {
+  Board,
+  Cell,
+  Coordinate,
+  Direction,
+  GameConfig,
+  GameState,
+  HouseholdColor,
+  HouseholdTile,
+  LastMove,
+  TurnSummary,
+} from '@/game/types'
 
 let tileCounter = 0
 
@@ -10,263 +18,133 @@ const makeTileId = (): string => {
   return `tile-${tileCounter}`
 }
 
-const defaultSummary = (): TurnSummary => ({
-  moved: false,
-  merges: 0,
-  flightCount: 0,
-  integrationRows: 0,
-  pointsGained: 0,
-  segregationWarning: false,
-  spawned: false,
+const createHousehold = (color: HouseholdColor): HouseholdTile => ({
+  id: makeTileId(),
+  color,
+  unhappy: false,
 })
-
-const cloneBoard = (board: Board): Board =>
-  board.map((row) => row.map((cell) => (cell ? { ...cell } : null)))
 
 const createEmptyBoard = (size: number): Board =>
   Array.from({ length: size }, () => Array.from({ length: size }, () => null))
 
+const cloneBoard = (board: Board): Board =>
+  board.map((row) => row.map((cell) => (cell === null ? null : { ...cell })))
+
 const isInBounds = (board: Board, row: number, col: number): boolean =>
   row >= 0 && col >= 0 && row < board.length && col < board.length
 
-const isHousehold = (tile: Tile | null): tile is Tile => tile !== null && tile.kind === 'household'
+const isHousehold = (cell: Cell): cell is HouseholdTile => cell !== null
 
-const isMinority = (tile: Tile | null): boolean => isHousehold(tile) && tile.color === 'orange'
+const directions: Coordinate[] = [
+  { row: -1, col: 0 },
+  { row: 1, col: 0 },
+  { row: 0, col: -1 },
+  { row: 0, col: 1 },
+]
 
-const isMajority = (tile: Tile | null): boolean => isHousehold(tile) && tile.color === 'blue'
+const orthogonalNeighbors = (board: Board, coordinate: Coordinate): Coordinate[] =>
+  directions
+    .map((step) => ({ row: coordinate.row + step.row, col: coordinate.col + step.col }))
+    .filter((next) => isInBounds(board, next.row, next.col))
 
-const canSlide = (tile: Tile | null): tile is Tile => isHousehold(tile) && !tile.locked
-
-const isImmovableWall = (tile: Tile | null): boolean => {
-  if (tile === null) {
-    return false
-  }
-
-  if (tile.kind !== 'household') {
+const isHappy = (board: Board, coordinate: Coordinate): boolean => {
+  const tile = board[coordinate.row][coordinate.col]
+  if (!isHousehold(tile)) {
     return true
   }
 
-  return tile.locked
+  return orthogonalNeighbors(board, coordinate).some((neighbor) => {
+    const neighborTile = board[neighbor.row][neighbor.col]
+    return isHousehold(neighborTile) && neighborTile.color === tile.color
+  })
 }
 
-const createHousehold = (color: HouseholdColor): Tile => ({
-  id: makeTileId(),
-  kind: 'household',
-  color,
-  locked: false,
-  mergedThisTurn: false,
-  isolationTurns: 0,
-})
-
-const createMergeResult = (a: Tile, b: Tile): Tile => {
-  if (a.color !== null && b.color !== null && a.color === b.color) {
-    return {
-      id: makeTileId(),
-      kind: 'gated_community',
-      color: null,
-      locked: false,
-      mergedThisTurn: true,
-      isolationTurns: 0,
-    }
-  }
-
-  return {
-    id: makeTileId(),
-    kind: 'community_center',
-    color: null,
-    locked: false,
-    mergedThisTurn: true,
-    isolationTurns: 0,
-  }
-}
-
-const canMerge = (mover: Tile, target: Tile | null): target is Tile => {
-  if (!isHousehold(target)) {
-    return false
-  }
-
-  if (target.locked || target.mergedThisTurn || mover.mergedThisTurn) {
-    return false
-  }
-
-  return true
-}
-
-const directionVector = (direction: Direction): Coordinate => {
-  switch (direction) {
-    case 'up':
-      return { row: -1, col: 0 }
-    case 'down':
-      return { row: 1, col: 0 }
-    case 'left':
-      return { row: 0, col: -1 }
-    case 'right':
-      return { row: 0, col: 1 }
-    default:
-      return { row: 0, col: 0 }
-  }
-}
-
-const traversalOrder = (size: number, direction: Direction): Coordinate[] => {
-  const order: Coordinate[] = []
-
-  if (direction === 'left') {
-    for (let row = 0; row < size; row += 1) {
-      for (let col = 1; col < size; col += 1) {
-        order.push({ row, col })
-      }
-    }
-    return order
-  }
-
-  if (direction === 'right') {
-    for (let row = 0; row < size; row += 1) {
-      for (let col = size - 2; col >= 0; col -= 1) {
-        order.push({ row, col })
-      }
-    }
-    return order
-  }
-
-  if (direction === 'up') {
-    for (let col = 0; col < size; col += 1) {
-      for (let row = 1; row < size; row += 1) {
-        order.push({ row, col })
-      }
-    }
-    return order
-  }
-
-  for (let col = 0; col < size; col += 1) {
-    for (let row = size - 2; row >= 0; row -= 1) {
-      order.push({ row, col })
-    }
-  }
-
-  return order
-}
-
-const resetMergeFlags = (board: Board): void => {
+const recomputeHappiness = (board: Board): void => {
   for (let row = 0; row < board.length; row += 1) {
     for (let col = 0; col < board.length; col += 1) {
       const tile = board[row][col]
-      if (tile !== null) {
-        tile.mergedThisTurn = false
+      if (!isHousehold(tile)) {
+        continue
       }
+      tile.unhappy = !isHappy(board, { row, col })
     }
   }
 }
 
-const slideAndMerge = (board: Board, direction: Direction): { moved: boolean; merges: number } => {
-  resetMergeFlags(board)
+const countUnhappy = (board: Board): number =>
+  board.flat().filter((cell) => isHousehold(cell) && cell.unhappy).length
 
-  const vector = directionVector(direction)
-  const order = traversalOrder(board.length, direction)
+const countVacancies = (board: Board): number => board.flat().filter((cell) => cell === null).length
 
-  let moved = false
-  let merges = 0
+const adjacencyStats = (board: Board): { same: number; mixed: number } => {
+  let same = 0
+  let mixed = 0
 
-  for (const position of order) {
-    const startTile = board[position.row][position.col]
-    if (!canSlide(startTile)) {
-      continue
-    }
-
-    let currentRow = position.row
-    let currentCol = position.col
-    const activeTile = startTile
-
-    while (true) {
-      const nextRow = currentRow + vector.row
-      const nextCol = currentCol + vector.col
-
-      if (!isInBounds(board, nextRow, nextCol)) {
-        break
-      }
-
-      const target = board[nextRow][nextCol]
-
-      if (target === null) {
-        board[nextRow][nextCol] = activeTile
-        board[currentRow][currentCol] = null
-        currentRow = nextRow
-        currentCol = nextCol
-        moved = true
+  for (let row = 0; row < board.length; row += 1) {
+    for (let col = 0; col < board.length; col += 1) {
+      const current = board[row][col]
+      if (!isHousehold(current)) {
         continue
       }
 
-      if (isImmovableWall(target)) {
-        break
+      const right = col + 1 < board.length ? board[row][col + 1] : null
+      const down = row + 1 < board.length ? board[row + 1][col] : null
+
+      if (isHousehold(right)) {
+        if (right.color === current.color) {
+          same += 1
+        } else {
+          mixed += 1
+        }
       }
 
-      if (canMerge(activeTile, target)) {
-        board[nextRow][nextCol] = createMergeResult(activeTile, target)
-        board[currentRow][currentCol] = null
-        moved = true
-        merges += 1
+      if (isHousehold(down)) {
+        if (down.color === current.color) {
+          same += 1
+        } else {
+          mixed += 1
+        }
       }
-      break
     }
   }
 
-  resetMergeFlags(board)
-  return { moved, merges }
+  return { same, mixed }
 }
 
-const getMinorityShare = (board: Board, cells: Coordinate[]): number => {
-  let minorityCount = 0
-  let householdCount = 0
-
-  for (const cell of cells) {
-    const tile = board[cell.row][cell.col]
-    if (!isHousehold(tile) || tile.color === null) {
-      continue
-    }
-
-    householdCount += 1
-    if (tile.color === 'orange') {
-      minorityCount += 1
-    }
-  }
-
-  if (householdCount === 0) {
+const calculateSegregationIndex = (board: Board): number => {
+  const { same, mixed } = adjacencyStats(board)
+  const total = same + mixed
+  if (total === 0) {
     return 0
   }
-
-  return minorityCount / householdCount
+  return Math.round((same / total) * 100)
 }
 
-const unitsForTipping = (board: Board, config: GameConfig): Coordinate[][] => {
-  const size = board.length
-  const units: Coordinate[][] = []
-
-  if (config.tippingUnit === 'row') {
-    for (let row = 0; row < size; row += 1) {
-      units.push(Array.from({ length: size }, (_, col) => ({ row, col })))
-    }
-    return units
+const calculateIntegrationIndex = (board: Board): number => {
+  const { same, mixed } = adjacencyStats(board)
+  const total = same + mixed
+  if (total === 0) {
+    return 0
   }
-
-  if (config.tippingUnit === 'column') {
-    for (let col = 0; col < size; col += 1) {
-      units.push(Array.from({ length: size }, (_, row) => ({ row, col })))
-    }
-    return units
-  }
-
-  for (let row = 0; row < size - 1; row += 1) {
-    for (let col = 0; col < size - 1; col += 1) {
-      units.push([
-        { row, col },
-        { row: row + 1, col },
-        { row, col: col + 1 },
-        { row: row + 1, col: col + 1 },
-      ])
-    }
-  }
-
-  return units
+  return Math.round((mixed / total) * 100)
 }
+
+const summaryForBoard = (
+  board: Board,
+  unhappyBefore: number,
+  selectedValid: boolean,
+  moved: boolean,
+  lastMove: LastMove | null,
+): TurnSummary => ({
+  moved,
+  selectedValid,
+  unhappyBefore,
+  unhappyAfter: countUnhappy(board),
+  segregationIndex: calculateSegregationIndex(board),
+  integrationIndex: calculateIntegrationIndex(board),
+  vacancyCount: countVacancies(board),
+  lastMove,
+})
 
 const shuffle = <T,>(items: T[]): T[] => {
   const result = [...items]
@@ -277,346 +155,173 @@ const shuffle = <T,>(items: T[]): T[] => {
   return result
 }
 
-const edgeCells = (board: Board): Coordinate[] => {
-  const size = board.length
-  const cells: Coordinate[] = []
+const allCoordinates = (size: number): Coordinate[] =>
+  Array.from({ length: size * size }, (_, index) => ({
+    row: Math.floor(index / size),
+    col: index % size,
+  }))
 
-  for (let i = 0; i < size; i += 1) {
-    cells.push({ row: 0, col: i })
-    cells.push({ row: size - 1, col: i })
+const isInDirection = (from: Coordinate, to: Coordinate, direction: Direction): boolean => {
+  if (direction === 'up') {
+    return to.row < from.row
   }
-
-  for (let row = 1; row < size - 1; row += 1) {
-    cells.push({ row, col: 0 })
-    cells.push({ row, col: size - 1 })
+  if (direction === 'down') {
+    return to.row > from.row
   }
-
-  return cells
+  if (direction === 'left') {
+    return to.col < from.col
+  }
+  return to.col > from.col
 }
 
-const manhattan = (a: Coordinate, b: Coordinate): number =>
-  Math.abs(a.row - b.row) + Math.abs(a.col - b.col)
-
-const findFarthestEdgeCell = (
-  board: Board,
-  minorityCells: Coordinate[],
-  excluded: Coordinate,
-): Coordinate | null => {
-  const center = { row: (board.length - 1) / 2, col: (board.length - 1) / 2 }
-
-  let bestScore = -Infinity
-  let candidates: Coordinate[] = []
-
-  for (const edge of edgeCells(board)) {
-    const tile = board[edge.row][edge.col]
-    if (tile !== null) {
-      continue
+const compareDirectionalTieBreak = (
+  from: Coordinate,
+  a: Coordinate,
+  b: Coordinate,
+  direction: Direction,
+): number => {
+  if (direction === 'up') {
+    if (a.row !== b.row) {
+      return a.row - b.row
     }
+    return Math.abs(a.col - from.col) - Math.abs(b.col - from.col)
+  }
 
-    if (edge.row === excluded.row && edge.col === excluded.col) {
-      continue
+  if (direction === 'down') {
+    if (a.row !== b.row) {
+      return b.row - a.row
     }
+    return Math.abs(a.col - from.col) - Math.abs(b.col - from.col)
+  }
 
-    let score = 0
-    if (minorityCells.length > 0) {
-      score = Math.min(...minorityCells.map((minorityCell) => manhattan(edge, minorityCell)))
-    } else {
-      score = manhattan(edge, center)
+  if (direction === 'left') {
+    if (a.col !== b.col) {
+      return a.col - b.col
     }
+    return Math.abs(a.row - from.row) - Math.abs(b.row - from.row)
+  }
 
-    if (score > bestScore) {
-      bestScore = score
-      candidates = [edge]
-    } else if (score === bestScore) {
-      candidates.push(edge)
+  if (a.col !== b.col) {
+    return b.col - a.col
+  }
+  return Math.abs(a.row - from.row) - Math.abs(b.row - from.row)
+}
+
+const nearestVacancyInDirection = (board: Board, from: Coordinate, direction: Direction): Coordinate | null => {
+  const vacancies: Coordinate[] = []
+
+  for (let row = 0; row < board.length; row += 1) {
+    for (let col = 0; col < board.length; col += 1) {
+      if (board[row][col] !== null) {
+        continue
+      }
+
+      const candidate = { row, col }
+      if (!isInDirection(from, candidate, direction)) {
+        continue
+      }
+      vacancies.push(candidate)
     }
   }
 
-  if (candidates.length === 0) {
+  if (vacancies.length === 0) {
     return null
   }
 
-  return candidates[Math.floor(Math.random() * candidates.length)]
+  const manhattanDistance = (a: Coordinate, b: Coordinate): number =>
+    Math.abs(a.row - b.row) + Math.abs(a.col - b.col)
+
+  vacancies.sort((a, b) => {
+    const distanceDelta = manhattanDistance(from, a) - manhattanDistance(from, b)
+    if (distanceDelta !== 0) {
+      return distanceDelta
+    }
+
+    const directionalDelta = compareDirectionalTieBreak(from, a, b, direction)
+    if (directionalDelta !== 0) {
+      return directionalDelta
+    }
+
+    if (a.row !== b.row) {
+      return a.row - b.row
+    }
+    return a.col - b.col
+  })
+
+  return vacancies[0]
 }
 
-const applyFlight = (board: Board, config: GameConfig): number => {
-  const candidates = new Map<string, Coordinate>()
+const moveTrail = (from: Coordinate, to: Coordinate, direction: Direction): Coordinate[] => {
+  const trail: Coordinate[] = []
+  let row = from.row
+  let col = from.col
 
-  for (const unit of unitsForTipping(board, config)) {
-    const minorityShare = getMinorityShare(board, unit)
-    if (minorityShare <= config.tippingThreshold) {
-      continue
+  if (direction === 'up' || direction === 'down') {
+    while (row !== to.row) {
+      row += row < to.row ? 1 : -1
+      trail.push({ row, col })
     }
-
-    for (const cell of unit) {
-      if (isMajority(board[cell.row][cell.col])) {
-        const key = `${cell.row}:${cell.col}`
-        candidates.set(key, cell)
-      }
+    while (col !== to.col) {
+      col += col < to.col ? 1 : -1
+      trail.push({ row, col })
     }
-  }
-
-  const majorityTargets = Array.from(candidates.values())
-  if (majorityTargets.length === 0) {
-    return 0
-  }
-
-  let fleeing: Coordinate[] = []
-
-  if (config.flightMode === 'deterministic') {
-    const count = Math.floor(majorityTargets.length * 0.5)
-    fleeing = shuffle(majorityTargets).slice(0, count)
   } else {
-    fleeing = majorityTargets.filter(() => Math.random() < config.flightProbability)
-  }
-
-  if (fleeing.length === 0) {
-    return 0
-  }
-
-  let events = 0
-
-  for (const departure of fleeing) {
-    const tile = board[departure.row][departure.col]
-    if (!isMajority(tile)) {
-      continue
+    while (col !== to.col) {
+      col += col < to.col ? 1 : -1
+      trail.push({ row, col })
     }
-
-    board[departure.row][departure.col] = null
-    events += 1
-
-    if (config.flightBehavior === 'despawn') {
-      continue
-    }
-
-    const minorityCells: Coordinate[] = []
-    for (let row = 0; row < board.length; row += 1) {
-      for (let col = 0; col < board.length; col += 1) {
-        if (isMinority(board[row][col])) {
-          minorityCells.push({ row, col })
-        }
-      }
-    }
-
-    const edgeTarget = findFarthestEdgeCell(board, minorityCells, departure)
-    if (edgeTarget !== null) {
-      board[edgeTarget.row][edgeTarget.col] = tile
+    while (row !== to.row) {
+      row += row < to.row ? 1 : -1
+      trail.push({ row, col })
     }
   }
 
-  return events
+  return trail
 }
 
-const minorityShareForRow = (board: Board, row: number): number => {
-  let households = 0
-  let minority = 0
+const normalizedConfig = (config: GameConfig): GameConfig => {
+  const size = Math.max(8, Math.min(16, Math.round(config.size)))
+  const initialOccupancy = Math.max(0.65, Math.min(0.98, config.initialOccupancy))
+  const minorityShare = Math.max(0.1, Math.min(0.2, config.minorityShare))
+  const maxTurns = Math.max(10, Math.min(80, Math.round(config.maxTurns)))
 
-  for (let col = 0; col < board.length; col += 1) {
-    const tile = board[row][col]
-    if (!isHousehold(tile) || tile.color === null) {
-      continue
-    }
-
-    households += 1
-    if (tile.color === 'orange') {
-      minority += 1
-    }
-  }
-
-  if (households === 0) {
-    return 0
-  }
-
-  return minority / households
-}
-
-const integrationRows = (board: Board, config: GameConfig): number => {
-  let rows = 0
-
-  for (let row = 0; row < board.length; row += 1) {
-    const share = minorityShareForRow(board, row)
-    if (share >= config.integrationBand.min && share <= config.integrationBand.max) {
-      rows += 1
-    }
-  }
-
-  return rows
-}
-
-const isBoardSegregated = (board: Board): boolean => {
-  let hasBlue = false
-  let hasOrange = false
-
-  for (let row = 0; row < board.length; row += 1) {
-    let rowHasBlue = false
-    let rowHasOrange = false
-
-    for (let col = 0; col < board.length; col += 1) {
-      const tile = board[row][col]
-      if (!isHousehold(tile) || tile.color === null) {
-        continue
-      }
-
-      if (tile.color === 'blue') {
-        rowHasBlue = true
-        hasBlue = true
-      }
-      if (tile.color === 'orange') {
-        rowHasOrange = true
-        hasOrange = true
-      }
-    }
-
-    if (rowHasBlue && rowHasOrange) {
-      return false
-    }
-  }
-
-  return hasBlue && hasOrange
-}
-
-const recomputeLocks = (board: Board, config: GameConfig): void => {
-  const size = board.length
-
-  for (let row = 0; row < size; row += 1) {
-    for (let col = 0; col < size; col += 1) {
-      const tile = board[row][col]
-      if (!isHousehold(tile) || tile.color === null) {
-        continue
-      }
-
-      let rowSameColor = 0
-      let colSameColor = 0
-
-      for (let index = 0; index < size; index += 1) {
-        const rowTile = board[row][index]
-        const colTile = board[index][col]
-
-        if (isHousehold(rowTile) && rowTile.color === tile.color) {
-          rowSameColor += 1
-        }
-
-        if (isHousehold(colTile) && colTile.color === tile.color) {
-          colSameColor += 1
-        }
-      }
-
-      const isolatedNow = rowSameColor === 1 && colSameColor === 1
-      if (isolatedNow) {
-        tile.isolationTurns += 1
-      } else {
-        tile.isolationTurns = 0
-      }
-
-      tile.locked = isolatedNow && tile.isolationTurns >= config.isolationLockDelayTurns
-    }
+  return {
+    size,
+    initialOccupancy,
+    minorityShare,
+    maxTurns,
   }
 }
 
-const emptyCells = (board: Board): Coordinate[] => {
-  const cells: Coordinate[] = []
-
-  for (let row = 0; row < board.length; row += 1) {
-    for (let col = 0; col < board.length; col += 1) {
-      if (board[row][col] === null) {
-        cells.push({ row, col })
-      }
-    }
-  }
-
-  return cells
-}
-
-const spawnOrangeShare = (config: GameConfig, turn: number): number => {
-  const base = config.spawnRatio.orange
-  const shifted = base + config.spawnRatioShiftPerTurn * turn
-  return clamp01(shifted)
-}
-
-const spawnOneHousehold = (board: Board, config: GameConfig, turn: number): boolean => {
-  const empty = emptyCells(board)
-  if (empty.length === 0) {
-    return false
-  }
-
-  const target = empty[Math.floor(Math.random() * empty.length)]
-  const orangeShare = spawnOrangeShare(config, turn)
-  const color: HouseholdColor = Math.random() < orangeShare ? 'orange' : 'blue'
-  board[target.row][target.col] = createHousehold(color)
-  return true
-}
-
-const spawnHouseholdsForTurn = (board: Board, config: GameConfig, turn: number): number => {
-  const targetSpawns = turn <= config.earlySpawnTurns ? config.earlySpawnPerTurn : config.spawnPerTurn
-  const lowSpaceCutoff = Math.max(2, Math.floor(board.length / 2))
-  const spawnCap = emptyCells(board).length <= lowSpaceCutoff ? 1 : targetSpawns
-
-  let spawned = 0
-  for (let i = 0; i < spawnCap; i += 1) {
-    const created = spawnOneHousehold(board, config, turn)
-    if (!created) {
-      break
-    }
-    spawned += 1
-  }
-
-  return spawned
-}
-
-const isFullyLocked = (board: Board): boolean => {
-  let households = 0
-  let locked = 0
-
-  for (let row = 0; row < board.length; row += 1) {
-    for (let col = 0; col < board.length; col += 1) {
-      const tile = board[row][col]
-      if (!isHousehold(tile)) {
-        continue
-      }
-
-      households += 1
-      if (tile.locked) {
-        locked += 1
-      }
-    }
-  }
-
-  return households > 0 && households === locked
-}
-
-const hasLegalMoves = (board: Board): boolean => {
-  for (const direction of DIRECTIONS) {
-    const probe = cloneBoard(board)
-    const result = slideAndMerge(probe, direction)
-    if (result.moved) {
-      return true
-    }
-  }
-
-  return false
-}
-
-export const createInitialState = (config: GameConfig): GameState => {
+export const createInitialState = (rawConfig: GameConfig): GameState => {
+  const config = normalizedConfig(rawConfig)
   const board = createEmptyBoard(config.size)
 
-  for (let i = 0; i < config.initialTiles; i += 1) {
-    const spawned = spawnOneHousehold(board, config, 0)
-    if (!spawned) {
-      break
-    }
+  const capacity = config.size * config.size
+  const householdCount = Math.max(2, Math.min(capacity - 1, Math.round(capacity * config.initialOccupancy)))
+  const minorityCount = Math.round(householdCount * config.minorityShare)
+  const majorityCount = householdCount - minorityCount
+
+  const colors = shuffle([
+    ...Array.from({ length: majorityCount }, () => 'blue' as const),
+    ...Array.from({ length: minorityCount }, () => 'orange' as const),
+  ])
+
+  const positions = shuffle(allCoordinates(config.size)).slice(0, householdCount)
+
+  for (let index = 0; index < positions.length; index += 1) {
+    const position = positions[index]
+    board[position.row][position.col] = createHousehold(colors[index])
   }
 
-  recomputeLocks(board, config)
+  recomputeHappiness(board)
 
   return {
     board,
     turn: 0,
-    totalScore: 0,
-    integrationTurnsSurvived: 0,
-    integrationStreak: 0,
     gameOver: false,
     gameOverReason: null,
-    summary: defaultSummary(),
+    summary: summaryForBoard(board, countUnhappy(board), true, false, null),
   }
 }
 
@@ -626,56 +331,66 @@ export const endSession = (state: GameState): GameState => ({
   gameOverReason: 'manual_end',
 })
 
-export const applyTurn = (state: GameState, direction: Direction, config: GameConfig): GameState => {
+export const applyTurn = (
+  state: GameState,
+  selected: Coordinate,
+  direction: Direction,
+  rawConfig: GameConfig,
+): GameState => {
   if (state.gameOver) {
     return state
   }
 
+  const config = normalizedConfig(rawConfig)
   const board = cloneBoard(state.board)
-  const moveOutcome = slideAndMerge(board, direction)
+  const unhappyBefore = countUnhappy(board)
 
-  if (!moveOutcome.moved) {
+  const selectedTile = isInBounds(board, selected.row, selected.col) ? board[selected.row][selected.col] : null
+  if (!isHousehold(selectedTile) || !selectedTile.unhappy) {
     return {
       ...state,
-      summary: {
-        ...defaultSummary(),
-        moved: false,
-      },
+      summary: summaryForBoard(board, unhappyBefore, false, false, null),
     }
   }
 
-  recomputeLocks(board, config)
-  const flightCount = applyFlight(board, config)
-  recomputeLocks(board, config)
+  const vacancy = nearestVacancyInDirection(board, selected, direction)
+  if (vacancy === null) {
+    return {
+      ...state,
+      summary: summaryForBoard(board, unhappyBefore, true, false, null),
+    }
+  }
+
+  board[vacancy.row][vacancy.col] = selectedTile
+  board[selected.row][selected.col] = null
+  recomputeHappiness(board)
 
   const turn = state.turn + 1
-  const spawnedCount = spawnHouseholdsForTurn(board, config, turn)
-  recomputeLocks(board, config)
+  const unhappyAfter = countUnhappy(board)
 
-  const rowsIntegrated = integrationRows(board, config)
-  const pointsGained = rowsIntegrated * config.integrationPointsPerRow
-  const segregationWarning = isBoardSegregated(board)
+  let gameOver = false
+  let gameOverReason: GameState['gameOverReason'] = null
 
-  const fullyLocked = isFullyLocked(board)
-  const noMoves = !hasLegalMoves(board)
-  const gameOver = fullyLocked || noMoves
+  if (unhappyAfter === 0) {
+    gameOver = true
+    gameOverReason = 'equilibrium'
+  } else if (turn >= config.maxTurns) {
+    gameOver = true
+    gameOverReason = 'max_turns'
+  }
+
+  const lastMove: LastMove = {
+    from: selected,
+    to: vacancy,
+    direction,
+    trail: moveTrail(selected, vacancy, direction),
+  }
 
   return {
     board,
     turn,
-    totalScore: state.totalScore + pointsGained,
-    integrationTurnsSurvived: state.integrationTurnsSurvived + (rowsIntegrated > 0 ? 1 : 0),
-    integrationStreak: rowsIntegrated > 0 ? state.integrationStreak + 1 : 0,
     gameOver,
-    gameOverReason: gameOver ? (fullyLocked ? 'fully_locked' : 'no_legal_moves') : null,
-    summary: {
-      moved: moveOutcome.moved,
-      merges: moveOutcome.merges,
-      flightCount,
-      integrationRows: rowsIntegrated,
-      pointsGained,
-      segregationWarning,
-      spawned: spawnedCount > 0,
-    },
+    gameOverReason,
+    summary: summaryForBoard(board, unhappyBefore, true, true, lastMove),
   }
 }

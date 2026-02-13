@@ -1,47 +1,63 @@
-import type { Board, HouseholdColor, Tile } from '@/game/types'
+import type { Board, HouseholdColor } from '@/game/types'
 
 interface Counts {
   blue: number
   orange: number
 }
 
-const isHousehold = (tile: Tile | null): tile is Tile => tile !== null && tile.kind === 'household'
+const isHousehold = (color: HouseholdColor | null): color is HouseholdColor => color !== null
 
-export const calculateSegregationIndex = (board: Board): number => {
-  let sameColorAdjacency = 0
-  let totalAdjacency = 0
+const adjacencyStats = (board: Board): { same: number; mixed: number } => {
+  let same = 0
+  let mixed = 0
 
   for (let row = 0; row < board.length; row += 1) {
     for (let col = 0; col < board.length; col += 1) {
       const current = board[row][col]
-      if (!isHousehold(current) || current.color === null) {
+      if (current === null) {
         continue
       }
 
       const right = col + 1 < board.length ? board[row][col + 1] : null
       const down = row + 1 < board.length ? board[row + 1][col] : null
 
-      if (isHousehold(right) && right.color !== null) {
-        totalAdjacency += 1
+      if (right !== null) {
         if (right.color === current.color) {
-          sameColorAdjacency += 1
+          same += 1
+        } else {
+          mixed += 1
         }
       }
 
-      if (isHousehold(down) && down.color !== null) {
-        totalAdjacency += 1
+      if (down !== null) {
         if (down.color === current.color) {
-          sameColorAdjacency += 1
+          same += 1
+        } else {
+          mixed += 1
         }
       }
     }
   }
 
-  if (totalAdjacency === 0) {
+  return { same, mixed }
+}
+
+export const calculateSegregationIndex = (board: Board): number => {
+  const { same, mixed } = adjacencyStats(board)
+  const total = same + mixed
+  if (total === 0) {
     return 0
   }
+  return Math.round((same / total) * 100)
+}
 
-  return Math.round((sameColorAdjacency / totalAdjacency) * 100)
+export const calculateIntegrationIndex = (board: Board): number => {
+  const { same, mixed } = adjacencyStats(board)
+  const total = same + mixed
+  if (total === 0) {
+    return 0
+  }
+  return Math.round((mixed / total) * 100)
 }
 
 export const countHouseholds = (board: Board): Counts => {
@@ -50,11 +66,12 @@ export const countHouseholds = (board: Board): Counts => {
   for (let row = 0; row < board.length; row += 1) {
     for (let col = 0; col < board.length; col += 1) {
       const tile = board[row][col]
-      if (!isHousehold(tile) || tile.color === null) {
+      const color = tile === null ? null : tile.color
+      if (!isHousehold(color)) {
         continue
       }
 
-      if (tile.color === 'blue') {
+      if (color === 'blue') {
         counts.blue += 1
       } else {
         counts.orange += 1

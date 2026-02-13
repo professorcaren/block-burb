@@ -1,80 +1,53 @@
 export type HouseholdColor = 'blue' | 'orange'
 
-export type TileKind = 'household' | 'gated_community' | 'community_center'
-
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
-export type TippingUnit = 'row' | 'column' | 'sector2x2'
-
-export type FlightMode = 'deterministic' | 'probabilistic'
-
-export type FlightBehavior = 'despawn' | 'edge-relocate'
-
-export interface Tile {
+export interface HouseholdTile {
   id: string
-  kind: TileKind
-  color: HouseholdColor | null
-  locked: boolean
-  mergedThisTurn: boolean
-  isolationTurns: number
+  color: HouseholdColor
+  unhappy: boolean
 }
 
-export type Cell = Tile | null
+export type Cell = HouseholdTile | null
 
 export type Board = Cell[][]
 
-export interface SpawnRatio {
-  blue: number
-  orange: number
-}
-
-export interface IntegrationBand {
-  min: number
-  max: number
-}
-
 export interface GameConfig {
   size: number
-  initialTiles: number
-  spawnRatio: SpawnRatio
-  spawnRatioShiftPerTurn: number
-  spawnPerTurn: number
-  earlySpawnPerTurn: number
-  earlySpawnTurns: number
-  isolationLockDelayTurns: number
-  tippingThreshold: number
-  tippingUnit: TippingUnit
-  flightMode: FlightMode
-  flightProbability: number
-  flightBehavior: FlightBehavior
-  integrationBand: IntegrationBand
-  integrationPointsPerRow: number
-}
-
-export type GameOverReason = 'no_legal_moves' | 'fully_locked' | 'manual_end'
-
-export interface TurnSummary {
-  moved: boolean
-  merges: number
-  flightCount: number
-  integrationRows: number
-  pointsGained: number
-  segregationWarning: boolean
-  spawned: boolean
-}
-
-export interface GameState {
-  board: Board
-  turn: number
-  totalScore: number
-  integrationTurnsSurvived: number
-  integrationStreak: number
-  gameOver: boolean
-  gameOverReason: GameOverReason | null
-  summary: TurnSummary
+  initialOccupancy: number
+  minorityShare: number
+  maxTurns: number
 }
 
 export interface Coordinate {
   row: number
   col: number
+}
+
+export interface LastMove {
+  from: Coordinate
+  to: Coordinate
+  direction: Direction
+  trail: Coordinate[]
+}
+
+export type GameOverReason = 'equilibrium' | 'max_turns' | 'manual_end'
+
+export interface TurnSummary {
+  moved: boolean
+  selectedValid: boolean
+  unhappyBefore: number
+  unhappyAfter: number
+  segregationIndex: number
+  integrationIndex: number
+  vacancyCount: number
+  lastMove: LastMove | null
+}
+
+export interface GameState {
+  board: Board
+  turn: number
+  gameOver: boolean
+  gameOverReason: GameOverReason | null
+  summary: TurnSummary
 }
