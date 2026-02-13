@@ -209,6 +209,52 @@ const moveTrail = (from: Coordinate, to: Coordinate): Coordinate[] => {
   return trail
 }
 
+const isObjectiveMet = (unhappy: number, segregationIndex: number, config: GameConfig): boolean => {
+  if (unhappy > 0) {
+    return false
+  }
+
+  if (config.winCondition === 'all_happy') {
+    return true
+  }
+
+  const cap = config.segregationCap ?? 100
+  return segregationIndex <= cap
+}
+
+const boardFromPreset = (config: GameConfig): Board | null => {
+  if (config.presetBoard === null) {
+    return null
+  }
+
+  if (config.presetBoard.length !== config.size) {
+    return null
+  }
+
+  const board = createEmptyBoard(config.size)
+  for (let row = 0; row < config.size; row += 1) {
+    const line = config.presetBoard[row]
+    if (line.length !== config.size) {
+      return null
+    }
+
+    for (let col = 0; col < config.size; col += 1) {
+      const cell = line[col]
+      if (cell === '.') {
+        continue
+      }
+
+      if (cell !== 'B' && cell !== 'O') {
+        return null
+      }
+
+      board[row][col] = createHousehold(cell === 'B' ? 'blue' : 'orange')
+    }
+  }
+
+  return board
+}
+
 const normalizedConfig = (config: GameConfig): GameConfig => {
   const size = Math.max(4, Math.min(12, Math.round(config.size)))
   const maxCells = size * size
@@ -222,23 +268,27 @@ const normalizedConfig = (config: GameConfig): GameConfig => {
     blueCount,
     orangeCount,
     maxTurns,
+    segregationCap: config.segregationCap === null ? null : Math.max(0, Math.min(100, Math.round(config.segregationCap))),
   }
 }
 
 export const createInitialState = (rawConfig: GameConfig): GameState => {
   const config = normalizedConfig(rawConfig)
-  const board = createEmptyBoard(config.size)
+  const presetBoard = boardFromPreset(config)
+  const board = presetBoard ?? createEmptyBoard(config.size)
 
-  const colors = shuffle([
-    ...Array.from({ length: config.blueCount }, () => 'blue' as const),
-    ...Array.from({ length: config.orangeCount }, () => 'orange' as const),
-  ])
+  if (presetBoard === null) {
+    const colors = shuffle([
+      ...Array.from({ length: config.blueCount }, () => 'blue' as const),
+      ...Array.from({ length: config.orangeCount }, () => 'orange' as const),
+    ])
 
-  const positions = shuffle(allCoordinates(config.size)).slice(0, colors.length)
+    const positions = shuffle(allCoordinates(config.size)).slice(0, colors.length)
 
-  for (let index = 0; index < positions.length; index += 1) {
-    const position = positions[index]
-    board[position.row][position.col] = createHousehold(colors[index])
+    for (let index = 0; index < positions.length; index += 1) {
+      const position = positions[index]
+      board[position.row][position.col] = createHousehold(colors[index])
+    }
   }
 
   recomputeHappiness(board)
@@ -295,9 +345,9 @@ export const applyTurn = (
 
   const turn = state.turn + 1
   const unhappyAfter = countUnhappy(board)
-
-  const gameOverReason =
-    unhappyAfter === 0 ? 'all_happy' : turn >= config.maxTurns ? 'max_turns' : null
+  const segregationIndex = calculateSegregationIndex(board)
+  const objectiveMet = isObjectiveMet(unhappyAfter, segregationIndex, config)
+  const gameOverReason = objectiveMet ? 'objective_met' : turn >= config.maxTurns ? 'max_turns' : null
 
   return {
     board,

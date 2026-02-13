@@ -11,7 +11,9 @@ export type Cell = HouseholdTile | null
 
 export type Board = Cell[][]
 
-export type LevelId = 'level0' | 'level1'
+export type LevelId = 'level0' | 'level1' | 'level2a' | 'level2b'
+
+export type WinCondition = 'all_happy' | 'all_happy_low_segregation'
 
 export interface GameConfig {
   levelId: LevelId
@@ -21,6 +23,9 @@ export interface GameConfig {
   blueCount: number
   orangeCount: number
   maxTurns: number
+  winCondition: WinCondition
+  segregationCap: number | null
+  presetBoard: string[] | null
 }
 
 export interface Coordinate {
@@ -34,7 +39,7 @@ export interface LastMove {
   trail: Coordinate[]
 }
 
-export type GameOverReason = 'all_happy' | 'max_turns' | 'manual_end'
+export type GameOverReason = 'objective_met' | 'max_turns' | 'manual_end'
 
 export interface TurnSummary {
   moved: boolean

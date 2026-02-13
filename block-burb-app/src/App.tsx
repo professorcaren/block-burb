@@ -30,8 +30,11 @@ const pulseClass = (tile: HouseholdTile): string => {
   return 'unhappy-pulse-light'
 }
 
-const gameOverMessage = (reason: string | null): string => {
-  if (reason === 'all_happy') {
+const gameOverMessage = (reason: string | null, config: GameConfig): string => {
+  if (reason === 'objective_met') {
+    if (config.winCondition === 'all_happy_low_segregation') {
+      return 'Objective met: everyone is happy and segregation stayed low.'
+    }
     return 'All households are now happy.'
   }
 
@@ -85,6 +88,15 @@ const levelBadge = (active: boolean): string =>
   active
     ? 'border-slate-900 bg-slate-900 text-white'
     : 'border-slate-300 bg-white text-slate-700 hover:border-slate-500'
+
+const nextLevelId = (currentLevel: LevelId): LevelId => {
+  const index = LEVEL_ORDER.indexOf(currentLevel)
+  if (index < 0) {
+    return LEVEL_ORDER[0]
+  }
+
+  return LEVEL_ORDER[(index + 1) % LEVEL_ORDER.length]
+}
 
 function App() {
   const [config, setConfig] = useState<GameConfig>(DEFAULT_CONFIG)
@@ -206,10 +218,22 @@ function App() {
       setStatusMessage(
         `Moved. Unhappy households: ${next.summary.unhappyBefore} -> ${next.summary.unhappyAfter}.`,
       )
+
+      if (
+        !next.gameOver &&
+        config.winCondition === 'all_happy_low_segregation' &&
+        next.summary.unhappyAfter === 0 &&
+        config.segregationCap !== null &&
+        next.summary.segregationIndex > config.segregationCap
+      ) {
+        setStatusMessage(
+          `Everyone is happy, but segregation is ${next.summary.segregationIndex}% (target <= ${config.segregationCap}%). Keep rearranging.`,
+        )
+      }
     }
 
     if (next.gameOver) {
-      setStatusMessage(gameOverMessage(next.gameOverReason))
+      setStatusMessage(gameOverMessage(next.gameOverReason, config))
     }
 
     setDragOrigin(null)
@@ -244,6 +268,7 @@ function App() {
     [game.board],
   )
   const counts = useMemo(() => countHouseholds(game.board), [game.board])
+  const segregationTooHigh = config.segregationCap !== null && segregationIndex > config.segregationCap
 
   const lastMoveTrail = useMemo(() => {
     const trail = game.summary.lastMove?.trail ?? []
@@ -256,7 +281,7 @@ function App() {
         <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/70 bg-white/90 p-4 shadow-[0_18px_40px_rgba(16,24,40,0.12)] backdrop-blur">
           <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Debrief</p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">{config.levelName}</h1>
-          <p className="mt-1 text-sm text-slate-600">{gameOverMessage(game.gameOverReason)}</p>
+          <p className="mt-1 text-sm text-slate-600">{gameOverMessage(game.gameOverReason, config)}</p>
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
             <div className="rounded-xl bg-slate-100 px-2 py-3">
@@ -277,7 +302,7 @@ function App() {
             </div>
           </div>
 
-          {game.gameOverReason === 'all_happy' ? (
+          {game.gameOverReason === 'objective_met' ? (
             <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               Outcome type: <span className="font-semibold">{equilibriumType(integrationIndex, segregationIndex)}</span>
               {config.levelId === 'level0'
@@ -302,9 +327,9 @@ function App() {
             <button
               type="button"
               className="w-1/2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-              onClick={() => switchLevel(config.levelId === 'level0' ? 'level1' : 'level0')}
+              onClick={() => switchLevel(nextLevelId(config.levelId))}
             >
-              {config.levelId === 'level0' ? 'Go To Level 1' : 'Go To Level 0'}
+              Next Level
             </button>
           </div>
         </section>
@@ -341,11 +366,16 @@ function App() {
         <section className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Current Goal</p>
           <p className="mt-1 text-xs text-slate-700">{config.levelNote}</p>
+          <p className="mt-1 text-xs text-slate-600">
+            {config.winCondition === 'all_happy_low_segregation'
+              ? `Win condition: 0 unhappy and segregation <= ${config.segregationCap}%.`
+              : 'Win condition: 0 unhappy households.'}
+          </p>
         </section>
 
-        <div className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-slate-100 px-2 py-2">
-            <p className="text-[10px] uppercase text-slate-500">Turn</p>
+            <p className="text-[10px] uppercase text-slate-500">Turns</p>
             <p className="text-base font-semibold text-slate-800">
               {game.turn}/{config.maxTurns}
             </p>
@@ -355,12 +385,10 @@ function App() {
             <p className="text-base font-semibold text-rose-700">{unhappyCount}</p>
           </div>
           <div className="rounded-lg bg-slate-100 px-2 py-2">
-            <p className="text-[10px] uppercase text-slate-500">Integration</p>
-            <p className="text-base font-semibold text-emerald-700">{integrationIndex}%</p>
-          </div>
-          <div className="rounded-lg bg-slate-100 px-2 py-2">
             <p className="text-[10px] uppercase text-slate-500">Segregation</p>
-            <p className="text-base font-semibold text-amber-700">{segregationIndex}%</p>
+            <p className={`text-base font-semibold ${segregationTooHigh ? 'text-rose-700' : 'text-amber-700'}`}>
+              {segregationIndex}%
+            </p>
           </div>
         </div>
 
