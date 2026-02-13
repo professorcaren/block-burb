@@ -1,21 +1,25 @@
 export type HouseholdColor = 'blue' | 'orange'
 
-export type Direction = 'up' | 'down' | 'left' | 'right'
-
 export interface HouseholdTile {
   id: string
   color: HouseholdColor
   unhappy: boolean
+  unhappyTurns: number
 }
 
 export type Cell = HouseholdTile | null
 
 export type Board = Cell[][]
 
+export type LevelId = 'level0' | 'level1'
+
 export interface GameConfig {
+  levelId: LevelId
+  levelName: string
+  levelNote: string
   size: number
-  initialOccupancy: number
-  minorityShare: number
+  blueCount: number
+  orangeCount: number
   maxTurns: number
 }
 
@@ -27,15 +31,14 @@ export interface Coordinate {
 export interface LastMove {
   from: Coordinate
   to: Coordinate
-  direction: Direction
   trail: Coordinate[]
 }
 
-export type GameOverReason = 'equilibrium' | 'max_turns' | 'manual_end'
+export type GameOverReason = 'all_happy' | 'max_turns' | 'manual_end'
 
 export interface TurnSummary {
   moved: boolean
-  selectedValid: boolean
+  validMove: boolean
   unhappyBefore: number
   unhappyAfter: number
   segregationIndex: number

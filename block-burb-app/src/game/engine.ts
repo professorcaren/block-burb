@@ -2,10 +2,8 @@ import type {
   Board,
   Cell,
   Coordinate,
-  Direction,
   GameConfig,
   GameState,
-  HouseholdColor,
   HouseholdTile,
   LastMove,
   TurnSummary,
@@ -18,10 +16,11 @@ const makeTileId = (): string => {
   return `tile-${tileCounter}`
 }
 
-const createHousehold = (color: HouseholdColor): HouseholdTile => ({
+const createHousehold = (color: HouseholdTile['color']): HouseholdTile => ({
   id: makeTileId(),
   color,
   unhappy: false,
+  unhappyTurns: 0,
 })
 
 const createEmptyBoard = (size: number): Board =>
@@ -35,7 +34,7 @@ const isInBounds = (board: Board, row: number, col: number): boolean =>
 
 const isHousehold = (cell: Cell): cell is HouseholdTile => cell !== null
 
-const directions: Coordinate[] = [
+const orthogonalSteps: Coordinate[] = [
   { row: -1, col: 0 },
   { row: 1, col: 0 },
   { row: 0, col: -1 },
@@ -43,14 +42,14 @@ const directions: Coordinate[] = [
 ]
 
 const orthogonalNeighbors = (board: Board, coordinate: Coordinate): Coordinate[] =>
-  directions
+  orthogonalSteps
     .map((step) => ({ row: coordinate.row + step.row, col: coordinate.col + step.col }))
     .filter((next) => isInBounds(board, next.row, next.col))
 
-const isHappy = (board: Board, coordinate: Coordinate): boolean => {
+const hasSameColorNeighbor = (board: Board, coordinate: Coordinate): boolean => {
   const tile = board[coordinate.row][coordinate.col]
   if (!isHousehold(tile)) {
-    return true
+    return false
   }
 
   return orthogonalNeighbors(board, coordinate).some((neighbor) => {
@@ -66,7 +65,10 @@ const recomputeHappiness = (board: Board): void => {
       if (!isHousehold(tile)) {
         continue
       }
-      tile.unhappy = !isHappy(board, { row, col })
+
+      const unhappyNow = !hasSameColorNeighbor(board, { row, col })
+      tile.unhappy = unhappyNow
+      tile.unhappyTurns = unhappyNow ? tile.unhappyTurns + 1 : 0
     }
   }
 }
@@ -132,12 +134,12 @@ const calculateIntegrationIndex = (board: Board): number => {
 const summaryForBoard = (
   board: Board,
   unhappyBefore: number,
-  selectedValid: boolean,
+  validMove: boolean,
   moved: boolean,
   lastMove: LastMove | null,
 ): TurnSummary => ({
   moved,
-  selectedValid,
+  validMove,
   unhappyBefore,
   unhappyAfter: countUnhappy(board),
   segregationIndex: calculateSegregationIndex(board),
@@ -161,134 +163,36 @@ const allCoordinates = (size: number): Coordinate[] =>
     col: index % size,
   }))
 
-const isInDirection = (from: Coordinate, to: Coordinate, direction: Direction): boolean => {
-  if (direction === 'up') {
-    return to.row < from.row
-  }
-  if (direction === 'down') {
-    return to.row > from.row
-  }
-  if (direction === 'left') {
-    return to.col < from.col
-  }
-  return to.col > from.col
-}
-
-const compareDirectionalTieBreak = (
-  from: Coordinate,
-  a: Coordinate,
-  b: Coordinate,
-  direction: Direction,
-): number => {
-  if (direction === 'up') {
-    if (a.row !== b.row) {
-      return a.row - b.row
-    }
-    return Math.abs(a.col - from.col) - Math.abs(b.col - from.col)
-  }
-
-  if (direction === 'down') {
-    if (a.row !== b.row) {
-      return b.row - a.row
-    }
-    return Math.abs(a.col - from.col) - Math.abs(b.col - from.col)
-  }
-
-  if (direction === 'left') {
-    if (a.col !== b.col) {
-      return a.col - b.col
-    }
-    return Math.abs(a.row - from.row) - Math.abs(b.row - from.row)
-  }
-
-  if (a.col !== b.col) {
-    return b.col - a.col
-  }
-  return Math.abs(a.row - from.row) - Math.abs(b.row - from.row)
-}
-
-const nearestVacancyInDirection = (board: Board, from: Coordinate, direction: Direction): Coordinate | null => {
-  const vacancies: Coordinate[] = []
-
-  for (let row = 0; row < board.length; row += 1) {
-    for (let col = 0; col < board.length; col += 1) {
-      if (board[row][col] !== null) {
-        continue
-      }
-
-      const candidate = { row, col }
-      if (!isInDirection(from, candidate, direction)) {
-        continue
-      }
-      vacancies.push(candidate)
-    }
-  }
-
-  if (vacancies.length === 0) {
-    return null
-  }
-
-  const manhattanDistance = (a: Coordinate, b: Coordinate): number =>
-    Math.abs(a.row - b.row) + Math.abs(a.col - b.col)
-
-  vacancies.sort((a, b) => {
-    const distanceDelta = manhattanDistance(from, a) - manhattanDistance(from, b)
-    if (distanceDelta !== 0) {
-      return distanceDelta
-    }
-
-    const directionalDelta = compareDirectionalTieBreak(from, a, b, direction)
-    if (directionalDelta !== 0) {
-      return directionalDelta
-    }
-
-    if (a.row !== b.row) {
-      return a.row - b.row
-    }
-    return a.col - b.col
-  })
-
-  return vacancies[0]
-}
-
-const moveTrail = (from: Coordinate, to: Coordinate, direction: Direction): Coordinate[] => {
+const moveTrail = (from: Coordinate, to: Coordinate): Coordinate[] => {
   const trail: Coordinate[] = []
   let row = from.row
   let col = from.col
 
-  if (direction === 'up' || direction === 'down') {
-    while (row !== to.row) {
-      row += row < to.row ? 1 : -1
-      trail.push({ row, col })
-    }
-    while (col !== to.col) {
-      col += col < to.col ? 1 : -1
-      trail.push({ row, col })
-    }
-  } else {
-    while (col !== to.col) {
-      col += col < to.col ? 1 : -1
-      trail.push({ row, col })
-    }
-    while (row !== to.row) {
-      row += row < to.row ? 1 : -1
-      trail.push({ row, col })
-    }
+  while (row !== to.row) {
+    row += row < to.row ? 1 : -1
+    trail.push({ row, col })
+  }
+
+  while (col !== to.col) {
+    col += col < to.col ? 1 : -1
+    trail.push({ row, col })
   }
 
   return trail
 }
 
 const normalizedConfig = (config: GameConfig): GameConfig => {
-  const size = Math.max(8, Math.min(16, Math.round(config.size)))
-  const initialOccupancy = Math.max(0.65, Math.min(0.98, config.initialOccupancy))
-  const minorityShare = Math.max(0.1, Math.min(0.2, config.minorityShare))
-  const maxTurns = Math.max(10, Math.min(80, Math.round(config.maxTurns)))
+  const size = Math.max(4, Math.min(12, Math.round(config.size)))
+  const maxCells = size * size
+  const blueCount = Math.max(1, Math.min(maxCells - 1, Math.round(config.blueCount)))
+  const orangeCount = Math.max(1, Math.min(maxCells - blueCount, Math.round(config.orangeCount)))
+  const maxTurns = Math.max(6, Math.min(80, Math.round(config.maxTurns)))
 
   return {
+    ...config,
     size,
-    initialOccupancy,
-    minorityShare,
+    blueCount,
+    orangeCount,
     maxTurns,
   }
 }
@@ -297,17 +201,12 @@ export const createInitialState = (rawConfig: GameConfig): GameState => {
   const config = normalizedConfig(rawConfig)
   const board = createEmptyBoard(config.size)
 
-  const capacity = config.size * config.size
-  const householdCount = Math.max(2, Math.min(capacity - 1, Math.round(capacity * config.initialOccupancy)))
-  const minorityCount = Math.round(householdCount * config.minorityShare)
-  const majorityCount = householdCount - minorityCount
-
   const colors = shuffle([
-    ...Array.from({ length: majorityCount }, () => 'blue' as const),
-    ...Array.from({ length: minorityCount }, () => 'orange' as const),
+    ...Array.from({ length: config.blueCount }, () => 'blue' as const),
+    ...Array.from({ length: config.orangeCount }, () => 'orange' as const),
   ])
 
-  const positions = shuffle(allCoordinates(config.size)).slice(0, householdCount)
+  const positions = shuffle(allCoordinates(config.size)).slice(0, colors.length)
 
   for (let index = 0; index < positions.length; index += 1) {
     const position = positions[index]
@@ -333,8 +232,8 @@ export const endSession = (state: GameState): GameState => ({
 
 export const applyTurn = (
   state: GameState,
-  selected: Coordinate,
-  direction: Direction,
+  from: Coordinate,
+  to: Coordinate,
   rawConfig: GameConfig,
 ): GameState => {
   if (state.gameOver) {
@@ -345,52 +244,42 @@ export const applyTurn = (
   const board = cloneBoard(state.board)
   const unhappyBefore = countUnhappy(board)
 
-  const selectedTile = isInBounds(board, selected.row, selected.col) ? board[selected.row][selected.col] : null
-  if (!isHousehold(selectedTile) || !selectedTile.unhappy) {
+  if (!isInBounds(board, from.row, from.col) || !isInBounds(board, to.row, to.col)) {
     return {
       ...state,
       summary: summaryForBoard(board, unhappyBefore, false, false, null),
     }
   }
 
-  const vacancy = nearestVacancyInDirection(board, selected, direction)
-  if (vacancy === null) {
+  const source = board[from.row][from.col]
+  const target = board[to.row][to.col]
+
+  if (!isHousehold(source) || !source.unhappy || target !== null) {
     return {
       ...state,
-      summary: summaryForBoard(board, unhappyBefore, true, false, null),
+      summary: summaryForBoard(board, unhappyBefore, false, false, null),
     }
   }
 
-  board[vacancy.row][vacancy.col] = selectedTile
-  board[selected.row][selected.col] = null
+  board[to.row][to.col] = source
+  board[from.row][from.col] = null
   recomputeHappiness(board)
 
   const turn = state.turn + 1
   const unhappyAfter = countUnhappy(board)
 
-  let gameOver = false
-  let gameOverReason: GameState['gameOverReason'] = null
-
-  if (unhappyAfter === 0) {
-    gameOver = true
-    gameOverReason = 'equilibrium'
-  } else if (turn >= config.maxTurns) {
-    gameOver = true
-    gameOverReason = 'max_turns'
-  }
-
-  const lastMove: LastMove = {
-    from: selected,
-    to: vacancy,
-    direction,
-    trail: moveTrail(selected, vacancy, direction),
-  }
+  const gameOverReason =
+    unhappyAfter === 0 ? 'all_happy' : turn >= config.maxTurns ? 'max_turns' : null
 
   return {
     board,
     turn,
-    gameOver,
+    gameOver: gameOverReason !== null,
     gameOverReason,
-    summary: summaryForBoard(board, unhappyBefore, true, true, lastMove),
+    summary: summaryForBoard(board, unhappyBefore, true, true, {
+      from,
+      to,
+      trail: moveTrail(from, to),
+    }),
   }
 }
