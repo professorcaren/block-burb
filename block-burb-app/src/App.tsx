@@ -4,11 +4,10 @@ import {
   calculateIntegrationIndex,
   calculateSegregationIndex,
   countHouseholds,
-  generateEquilibriumMap,
 } from '@/game/debrief'
 import { LEVEL_ORDER, configForLevel, DEFAULT_CONFIG } from '@/game/config'
 import { applyTurn, createInitialState, endSession } from '@/game/engine'
-import type { Board, Coordinate, GameConfig, HouseholdColor, HouseholdTile, LevelId } from '@/game/types'
+import type { Board, Coordinate, GameConfig, HouseholdTile, LevelId } from '@/game/types'
 
 const householdClasses = (tile: HouseholdTile): string =>
   tile.color === 'blue'
@@ -82,24 +81,6 @@ const MiniMap = ({ board }: { board: Board }) => (
   </div>
 )
 
-const EquilibriumPreview = ({ map }: { map: (HouseholdColor | null)[][] }) => (
-  <div
-    className="grid gap-1 rounded-xl border border-slate-200 bg-slate-100/70 p-2"
-    style={{ gridTemplateColumns: `repeat(${map.length}, minmax(0, 1fr))` }}
-  >
-    {map.flatMap((row, rowIndex) =>
-      row.map((cell, colIndex) => (
-        <div
-          key={`equilibrium-${rowIndex}-${colIndex}`}
-          className={`aspect-square rounded-sm ${
-            cell === null ? 'bg-white/70' : cell === 'blue' ? 'bg-[#1f5ea8]' : 'bg-[#d97a2f]'
-          }`}
-        />
-      )),
-    )}
-  </div>
-)
-
 const levelBadge = (active: boolean): string =>
   active
     ? 'border-slate-900 bg-slate-900 text-white'
@@ -108,7 +89,7 @@ const levelBadge = (active: boolean): string =>
 function App() {
   const [config, setConfig] = useState<GameConfig>(DEFAULT_CONFIG)
   const [game, setGame] = useState(() => createInitialState(DEFAULT_CONFIG))
-  const [statusMessage, setStatusMessage] = useState('Drag a pulsing household to an empty lot.')
+  const [statusMessage, setStatusMessage] = useState('Drag any household to an empty lot.')
   const [dragOrigin, setDragOrigin] = useState<Coordinate | null>(null)
   const [dragTarget, setDragTarget] = useState<Coordinate | null>(null)
 
@@ -118,14 +99,14 @@ function App() {
     const nextConfig = configForLevel(levelId)
     setConfig(nextConfig)
     setGame(createInitialState(nextConfig))
-    setStatusMessage('New level loaded. Drag a pulsing household to an empty lot.')
+    setStatusMessage('New level loaded. Drag any household to an empty lot.')
     setDragOrigin(null)
     setDragTarget(null)
   }
 
   const restart = (): void => {
     setGame(createInitialState(config))
-    setStatusMessage('Board reset. Drag a pulsing household to an empty lot.')
+    setStatusMessage('Board reset. Drag any household to an empty lot.')
     setDragOrigin(null)
     setDragTarget(null)
   }
@@ -164,18 +145,13 @@ function App() {
 
     const cell = game.board[row][col]
     if (cell === null) {
-      setStatusMessage('Start the drag from a pulsing household, not from a vacancy.')
-      return
-    }
-
-    if (!cell.unhappy) {
-      setStatusMessage('Only pulsing households can move right now.')
+      setStatusMessage('Start the drag from a household, not from a vacancy.')
       return
     }
 
     setDragOrigin({ row, col })
     setDragTarget(null)
-    setStatusMessage('Now drag this household to any empty lot and release.')
+    setStatusMessage('Now drag this household to an empty lot and release.')
     boardRef.current?.setPointerCapture(event.pointerId)
     event.preventDefault()
   }
@@ -225,7 +201,7 @@ function App() {
     setGame(next)
 
     if (!next.summary.validMove) {
-      setStatusMessage('That move was not valid. Move only pulsing households into vacancies.')
+      setStatusMessage('That move was not valid. Move a household into a vacancy.')
     } else if (next.summary.moved) {
       setStatusMessage(
         `Moved. Unhappy households: ${next.summary.unhappyBefore} -> ${next.summary.unhappyAfter}.`,
@@ -269,11 +245,6 @@ function App() {
   )
   const counts = useMemo(() => countHouseholds(game.board), [game.board])
 
-  const equilibriumMap = useMemo(
-    () => generateEquilibriumMap(game.board.length, counts.blue, counts.orange),
-    [counts.blue, counts.orange, game.board.length],
-  )
-
   const lastMoveTrail = useMemo(() => {
     const trail = game.summary.lastMove?.trail ?? []
     return new Set(trail.map((coordinate) => keyFor(coordinate)))
@@ -315,15 +286,9 @@ function App() {
             </p>
           ) : null}
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <div>
-              <p className="mb-2 text-sm font-medium text-slate-700">Final map</p>
-              <MiniMap board={game.board} />
-            </div>
-            <div>
-              <p className="mb-2 text-sm font-medium text-slate-700">Reference map</p>
-              <EquilibriumPreview map={equilibriumMap} />
-            </div>
+          <div className="mt-5">
+            <p className="mb-2 text-sm font-medium text-slate-700">Final map</p>
+            <MiniMap board={game.board} />
           </div>
 
           <div className="mt-5 flex gap-2">
@@ -354,7 +319,7 @@ function App() {
           <div>
             <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Classroom Simulation</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900">Block 'Burb</h1>
-            <p className="mt-1 text-xs text-slate-600">Drag pulsing households into empty lots.</p>
+            <p className="mt-1 text-xs text-slate-600">Drag households into empty lots.</p>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -444,9 +409,7 @@ function App() {
                     onPointerDown={(event) => onCellPointerDown(rowIndex, colIndex, event)}
                     className={`relative aspect-square rounded-md border ${householdClasses(cell)} ${pulseClass(cell)} ${originClass} ${targetClass} ${trailClass}`}
                     aria-label={cell.unhappy ? 'Unhappy household' : 'Happy household'}
-                  >
-                    {cell.unhappy ? <span className="absolute left-1 top-1 text-[10px] text-white">!</span> : null}
-                  </button>
+                  />
                 )
               }),
             )}
@@ -480,10 +443,10 @@ function App() {
             Blue and orange squares are households. White squares are vacancies.
           </p>
           <p>
-            Pulsing intensity grows with continued unhappiness.
+            A pulse means the household is unhappy; stronger pulsing means it has stayed unhappy longer.
           </p>
           <p>
-            Drag from a pulsing household and drop on any vacancy.
+            You can move any household by dragging it onto a vacancy.
           </p>
         </footer>
       </section>

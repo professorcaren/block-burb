@@ -34,28 +34,49 @@ const isInBounds = (board: Board, row: number, col: number): boolean =>
 
 const isHousehold = (cell: Cell): cell is HouseholdTile => cell !== null
 
-const orthogonalSteps: Coordinate[] = [
+const neighborSteps: Coordinate[] = [
   { row: -1, col: 0 },
   { row: 1, col: 0 },
   { row: 0, col: -1 },
   { row: 0, col: 1 },
+  { row: -1, col: -1 },
+  { row: -1, col: 1 },
+  { row: 1, col: -1 },
+  { row: 1, col: 1 },
 ]
 
-const orthogonalNeighbors = (board: Board, coordinate: Coordinate): Coordinate[] =>
-  orthogonalSteps
+const neighboringCells = (board: Board, coordinate: Coordinate): Coordinate[] =>
+  neighborSteps
     .map((step) => ({ row: coordinate.row + step.row, col: coordinate.col + step.col }))
     .filter((next) => isInBounds(board, next.row, next.col))
 
-const hasSameColorNeighbor = (board: Board, coordinate: Coordinate): boolean => {
+const isUnhappy = (board: Board, coordinate: Coordinate): boolean => {
   const tile = board[coordinate.row][coordinate.col]
   if (!isHousehold(tile)) {
     return false
   }
 
-  return orthogonalNeighbors(board, coordinate).some((neighbor) => {
+  let occupiedNeighborCount = 0
+  let sameColorNeighborCount = 0
+
+  for (const neighbor of neighboringCells(board, coordinate)) {
     const neighborTile = board[neighbor.row][neighbor.col]
-    return isHousehold(neighborTile) && neighborTile.color === tile.color
-  })
+    if (!isHousehold(neighborTile)) {
+      continue
+    }
+
+    occupiedNeighborCount += 1
+    if (neighborTile.color === tile.color) {
+      sameColorNeighborCount += 1
+    }
+  }
+
+  // A household with no neighbors is treated as happy.
+  if (occupiedNeighborCount === 0) {
+    return false
+  }
+
+  return sameColorNeighborCount === 0
 }
 
 const recomputeHappiness = (board: Board): void => {
@@ -66,7 +87,7 @@ const recomputeHappiness = (board: Board): void => {
         continue
       }
 
-      const unhappyNow = !hasSameColorNeighbor(board, { row, col })
+      const unhappyNow = isUnhappy(board, { row, col })
       tile.unhappy = unhappyNow
       tile.unhappyTurns = unhappyNow ? tile.unhappyTurns + 1 : 0
     }
@@ -82,6 +103,13 @@ const adjacencyStats = (board: Board): { same: number; mixed: number } => {
   let same = 0
   let mixed = 0
 
+  const uniquePairOffsets: Coordinate[] = [
+    { row: 0, col: 1 },
+    { row: 1, col: 0 },
+    { row: 1, col: 1 },
+    { row: 1, col: -1 },
+  ]
+
   for (let row = 0; row < board.length; row += 1) {
     for (let col = 0; col < board.length; col += 1) {
       const current = board[row][col]
@@ -89,19 +117,19 @@ const adjacencyStats = (board: Board): { same: number; mixed: number } => {
         continue
       }
 
-      const right = col + 1 < board.length ? board[row][col + 1] : null
-      const down = row + 1 < board.length ? board[row + 1][col] : null
-
-      if (isHousehold(right)) {
-        if (right.color === current.color) {
-          same += 1
-        } else {
-          mixed += 1
+      for (const offset of uniquePairOffsets) {
+        const nextRow = row + offset.row
+        const nextCol = col + offset.col
+        if (!isInBounds(board, nextRow, nextCol)) {
+          continue
         }
-      }
 
-      if (isHousehold(down)) {
-        if (down.color === current.color) {
+        const neighbor = board[nextRow][nextCol]
+        if (!isHousehold(neighbor)) {
+          continue
+        }
+
+        if (neighbor.color === current.color) {
           same += 1
         } else {
           mixed += 1
@@ -254,7 +282,7 @@ export const applyTurn = (
   const source = board[from.row][from.col]
   const target = board[to.row][to.col]
 
-  if (!isHousehold(source) || !source.unhappy || target !== null) {
+  if (!isHousehold(source) || target !== null) {
     return {
       ...state,
       summary: summaryForBoard(board, unhappyBefore, false, false, null),

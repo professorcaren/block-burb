@@ -11,6 +11,13 @@ const adjacencyStats = (board: Board): { same: number; mixed: number } => {
   let same = 0
   let mixed = 0
 
+  const uniquePairOffsets = [
+    { row: 0, col: 1 },
+    { row: 1, col: 0 },
+    { row: 1, col: 1 },
+    { row: 1, col: -1 },
+  ]
+
   for (let row = 0; row < board.length; row += 1) {
     for (let col = 0; col < board.length; col += 1) {
       const current = board[row][col]
@@ -18,19 +25,19 @@ const adjacencyStats = (board: Board): { same: number; mixed: number } => {
         continue
       }
 
-      const right = col + 1 < board.length ? board[row][col + 1] : null
-      const down = row + 1 < board.length ? board[row + 1][col] : null
-
-      if (right !== null) {
-        if (right.color === current.color) {
-          same += 1
-        } else {
-          mixed += 1
+      for (const offset of uniquePairOffsets) {
+        const nextRow = row + offset.row
+        const nextCol = col + offset.col
+        if (nextRow < 0 || nextCol < 0 || nextRow >= board.length || nextCol >= board.length) {
+          continue
         }
-      }
 
-      if (down !== null) {
-        if (down.color === current.color) {
+        const neighbor = board[nextRow][nextCol]
+        if (neighbor === null) {
+          continue
+        }
+
+        if (neighbor.color === current.color) {
           same += 1
         } else {
           mixed += 1
