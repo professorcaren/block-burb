@@ -6,6 +6,7 @@ import {
   countHouseholds,
 } from '@/game/debrief'
 import { LEVEL_ORDER, configForLevel, DEFAULT_CONFIG } from '@/game/config'
+import { LEVEL2_PUZZLES, clampLevel2PuzzleIndex, configForLevel2Puzzle, level2PuzzleCount } from '@/game/level2Puzzles'
 import { applyTurn, createInitialState, endSession } from '@/game/engine'
 import type { Board, Coordinate, GameConfig, HouseholdTile, LevelId } from '@/game/types'
 
@@ -98,27 +99,54 @@ const nextLevelId = (currentLevel: LevelId): LevelId => {
   return LEVEL_ORDER[(index + 1) % LEVEL_ORDER.length]
 }
 
+const configForSession = (levelId: LevelId, level2PuzzleIndex: number): GameConfig => {
+  const baseConfig = configForLevel(levelId)
+  if (levelId !== 'level2') {
+    return baseConfig
+  }
+
+  return configForLevel2Puzzle(baseConfig, level2PuzzleIndex)
+}
+
 function App() {
-  const [config, setConfig] = useState<GameConfig>(DEFAULT_CONFIG)
-  const [game, setGame] = useState(() => createInitialState(DEFAULT_CONFIG))
+  const [level2PuzzleIndex, setLevel2PuzzleIndex] = useState(0)
+  const [config, setConfig] = useState<GameConfig>(() => configForSession(DEFAULT_CONFIG.levelId, 0))
+  const [game, setGame] = useState(() => createInitialState(configForSession(DEFAULT_CONFIG.levelId, 0)))
   const [statusMessage, setStatusMessage] = useState('Drag any household to an empty lot.')
   const [dragOrigin, setDragOrigin] = useState<Coordinate | null>(null)
   const [dragTarget, setDragTarget] = useState<Coordinate | null>(null)
 
   const boardRef = useRef<HTMLDivElement | null>(null)
 
-  const switchLevel = (levelId: LevelId): void => {
-    const nextConfig = configForLevel(levelId)
+  const loadLevel = (levelId: LevelId, puzzleIndex: number): void => {
+    const safePuzzleIndex = clampLevel2PuzzleIndex(puzzleIndex)
+    const nextConfig = configForSession(levelId, safePuzzleIndex)
     setConfig(nextConfig)
     setGame(createInitialState(nextConfig))
-    setStatusMessage('New level loaded. Drag any household to an empty lot.')
+    if (levelId === 'level2') {
+      const puzzle = LEVEL2_PUZZLES[safePuzzleIndex]
+      setLevel2PuzzleIndex(safePuzzleIndex)
+      setStatusMessage(`Loaded ${puzzle.title} (${puzzle.difficulty}). Drag any household to an empty lot.`)
+    } else {
+      setLevel2PuzzleIndex(0)
+      setStatusMessage('New level loaded. Drag any household to an empty lot.')
+    }
     setDragOrigin(null)
     setDragTarget(null)
   }
 
+  const switchLevel = (levelId: LevelId): void => {
+    loadLevel(levelId, 0)
+  }
+
   const restart = (): void => {
     setGame(createInitialState(config))
-    setStatusMessage('Board reset. Drag any household to an empty lot.')
+    if (config.levelId === 'level2') {
+      const puzzle = LEVEL2_PUZZLES[clampLevel2PuzzleIndex(level2PuzzleIndex)]
+      setStatusMessage(`Puzzle reset (${puzzle.title}). Drag any household to an empty lot.`)
+    } else {
+      setStatusMessage('Board reset. Drag any household to an empty lot.')
+    }
     setDragOrigin(null)
     setDragTarget(null)
   }
@@ -269,6 +297,10 @@ function App() {
   )
   const counts = useMemo(() => countHouseholds(game.board), [game.board])
   const segregationTooHigh = config.segregationCap !== null && segregationIndex > config.segregationCap
+  const safeLevel2PuzzleIndex = clampLevel2PuzzleIndex(level2PuzzleIndex)
+  const activeLevel2Puzzle = config.levelId === 'level2' ? LEVEL2_PUZZLES[safeLevel2PuzzleIndex] : null
+  const canAdvanceLevel2Puzzle = config.levelId === 'level2' && game.gameOverReason === 'objective_met'
+  const hasNextLevel2Puzzle = canAdvanceLevel2Puzzle && safeLevel2PuzzleIndex < level2PuzzleCount() - 1
 
   const lastMoveTrail = useMemo(() => {
     const trail = game.summary.lastMove?.trail ?? []
@@ -281,6 +313,11 @@ function App() {
         <section className="mx-auto w-full max-w-xl rounded-2xl border border-white/70 bg-white/90 p-4 shadow-[0_18px_40px_rgba(16,24,40,0.12)] backdrop-blur">
           <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Debrief</p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">{config.levelName}</h1>
+          {activeLevel2Puzzle !== null ? (
+            <p className="mt-1 text-xs text-slate-500">
+              Puzzle {safeLevel2PuzzleIndex + 1}/{level2PuzzleCount()} • {activeLevel2Puzzle.difficulty}
+            </p>
+          ) : null}
           <p className="mt-1 text-sm text-slate-600">{gameOverMessage(game.gameOverReason, config)}</p>
 
           <div className="mt-4 grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
@@ -327,9 +364,32 @@ function App() {
             <button
               type="button"
               className="w-1/2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-              onClick={() => switchLevel(nextLevelId(config.levelId))}
+              onClick={() => {
+                if (config.levelId === 'level2') {
+                  if (hasNextLevel2Puzzle) {
+                    loadLevel('level2', safeLevel2PuzzleIndex + 1)
+                    return
+                  }
+
+                  if (canAdvanceLevel2Puzzle) {
+                    loadLevel('level2', 0)
+                    return
+                  }
+
+                  switchLevel('level1')
+                  return
+                }
+
+                switchLevel(nextLevelId(config.levelId))
+              }}
             >
-              Next Level
+              {config.levelId === 'level2'
+                ? hasNextLevel2Puzzle
+                  ? 'Next Puzzle'
+                  : canAdvanceLevel2Puzzle
+                    ? 'Restart Puzzle Track'
+                    : 'Back To Level 1'
+                : 'Next Level'}
             </button>
           </div>
         </section>
@@ -345,6 +405,11 @@ function App() {
             <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Classroom Simulation</p>
             <h1 className="mt-1 text-2xl font-semibold text-slate-900">Block 'Burb</h1>
             <p className="mt-1 text-xs text-slate-600">Drag households into empty lots.</p>
+            {activeLevel2Puzzle !== null ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Puzzle {safeLevel2PuzzleIndex + 1}/{level2PuzzleCount()} • {activeLevel2Puzzle.difficulty}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-col gap-2">

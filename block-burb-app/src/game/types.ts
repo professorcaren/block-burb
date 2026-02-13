@@ -11,7 +11,7 @@ export type Cell = HouseholdTile | null
 
 export type Board = Cell[][]
 
-export type LevelId = 'level0' | 'level1' | 'level2a' | 'level2b'
+export type LevelId = 'level0' | 'level1' | 'level2'
 
 export type WinCondition = 'all_happy' | 'all_happy_low_segregation'
 
