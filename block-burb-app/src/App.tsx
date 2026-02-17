@@ -35,10 +35,14 @@ interface StepResult {
 const BOARD_SIZE = 8
 const STEP_DELAY_MS = 360
 const GITHUB_REPO_URL = 'https://github.com/professorcaren/block-burb'
+const ROUND_TWO_ID = 2
+const ROUND_TWO_MIN_BIAS = 20
+const ROUND_TWO_MAX_BIAS = 60
+const ROUND_TWO_DEFAULT_BIAS = 33
 
 const ROUNDS: RoundConfig[] = [
   { id: 1, label: 'Easy', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
-  { id: 2, label: 'Mid', tolerance: 0.42, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
+  { id: 2, label: 'Mid', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
   { id: 3, label: 'Hard', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
 ]
 
@@ -169,13 +173,16 @@ const analyzeBoard = (board: Board, tolerance: number): BoardAnalysis => {
 const minimumUnhappyForRound = (round: RoundConfig): number =>
   Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
 
-const createPlayableRoundBoard = (round: RoundConfig): Board => {
+const toleranceForRound = (round: RoundConfig, roundTwoBias: number): number =>
+  round.id === ROUND_TWO_ID ? roundTwoBias / 100 : round.tolerance
+
+const createPlayableRoundBoard = (round: RoundConfig, tolerance: number): Board => {
   let bestUnsolvedBoard: Board | null = null
   let bestUnhappy = -1
 
   for (let attempt = 0; attempt < 240; attempt += 1) {
     const candidate = createRoundBoard(round)
-    const analysis = analyzeBoard(candidate, round.tolerance)
+    const analysis = analyzeBoard(candidate, tolerance)
 
     if (analysis.unhappyCount > 0 && analysis.unhappyCount > bestUnhappy) {
       bestUnsolvedBoard = candidate
@@ -241,7 +248,10 @@ const isRoundCompleted = (analysis: BoardAnalysis, round: RoundConfig): boolean 
 
 function App() {
   const [roundIndex, setRoundIndex] = useState(0)
-  const [board, setBoard] = useState<Board>(() => createPlayableRoundBoard(ROUNDS[0]))
+  const [roundTwoBias, setRoundTwoBias] = useState(ROUND_TWO_DEFAULT_BIAS)
+  const [board, setBoard] = useState<Board>(() =>
+    createPlayableRoundBoard(ROUNDS[0], toleranceForRound(ROUNDS[0], ROUND_TWO_DEFAULT_BIAS)),
+  )
   const [running, setRunning] = useState(false)
   const [turns, setTurns] = useState(0)
   const [hint, setHint] = useState('Unhappy households pulse. Press Play to watch movement.')
@@ -253,7 +263,8 @@ function App() {
 
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
-  const analysis = useMemo(() => analyzeBoard(board, round.tolerance), [board, round.tolerance])
+  const effectiveTolerance = toleranceForRound(round, roundTwoBias)
+  const analysis = useMemo(() => analyzeBoard(board, effectiveTolerance), [board, effectiveTolerance])
   const completed = turns > 0 && isRoundCompleted(analysis, round)
   const segregationAlert = analysis.segregation > round.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
@@ -303,30 +314,31 @@ function App() {
   const resetRound = useCallback((): void => {
     setRunning(false)
     setTurns(0)
-    setBoard(createPlayableRoundBoard(round))
+    setBoard(createPlayableRoundBoard(round, effectiveTolerance))
     setHint('Random start loaded. Watch the pulse, then move.')
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [round])
+  }, [effectiveTolerance, round])
 
   const loadRound = useCallback((index: number): void => {
     const nextRound = ROUNDS[index]
+    const nextTolerance = toleranceForRound(nextRound, roundTwoBias)
     setRoundIndex(index)
     setRunning(false)
     setTurns(0)
-    setBoard(createPlayableRoundBoard(nextRound))
+    setBoard(createPlayableRoundBoard(nextRound, nextTolerance))
     setHint(`${nextRound.label} layout ready.`)
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [])
+  }, [roundTwoBias])
 
   const runStep = useCallback(
     (fromAuto = false): boolean => {
-      const step = moveOneUnhappy(board, round.tolerance)
+      const step = moveOneUnhappy(board, effectiveTolerance)
       if (!step.moved || !step.source || !step.target) {
         setRunning(false)
         if (analysis.unhappyCount === 0) {
@@ -341,7 +353,7 @@ function App() {
       setTurns((value) => value + 1)
       setMoveTrail({ from: keyFor(step.source), to: keyFor(step.target) })
 
-      const nextAnalysis = analyzeBoard(step.board, round.tolerance)
+      const nextAnalysis = analyzeBoard(step.board, effectiveTolerance)
       if (nextAnalysis.unhappyCount === 0) {
         if (nextAnalysis.segregation <= round.targetSegregation) {
           setHint('Everyone is happy and segregation stayed low.')
@@ -357,7 +369,7 @@ function App() {
 
       return true
     },
-    [analysis.unhappyCount, board, round.targetSegregation, round.tolerance, segregationAlert],
+    [analysis.unhappyCount, board, effectiveTolerance, round.targetSegregation, segregationAlert],
   )
 
   useEffect(() => {
@@ -426,8 +438,34 @@ function App() {
         </div>
 
         <p className="mt-2 text-center text-[11px] text-slate-600">
-          Round {round.id}: {round.label} • tolerance {Math.round(round.tolerance * 100)}% • target ≤ {round.targetSegregation}%
+          Round {round.id}: {round.label} • tolerance {Math.round(effectiveTolerance * 100)}% • target ≤ {round.targetSegregation}%
         </p>
+
+        {round.id === ROUND_TWO_ID && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+              <span>Bias Slider</span>
+              <span>{roundTwoBias}%</span>
+            </div>
+            <input
+              type="range"
+              min={ROUND_TWO_MIN_BIAS}
+              max={ROUND_TWO_MAX_BIAS}
+              step={1}
+              value={roundTwoBias}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setRoundTwoBias(value)
+                setRunning(false)
+                setHint(`Round 2 bias set to ${value}%. Remix or press Play.`)
+              }}
+              className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
+            />
+            <p className="mt-1 text-[11px] text-amber-900">
+              Small individual bias can create big collective segregation. 33% is the tipping edge; 50% segregates fast.
+            </p>
+          </div>
+        )}
 
         <div className="mt-3 rounded-xl border border-slate-200 bg-[#f3f6fb] p-2">
           <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))` }}>
