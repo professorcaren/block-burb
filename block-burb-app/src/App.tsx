@@ -51,10 +51,12 @@ const SCENE_THREE_MAX_DEFAULT = 80
 const SCENE_THREE_MIN_GAP = 5
 const SCENE_FOUR_ID = 4
 const SCENE_FOUR_DEFAULT_BLUE_SHARE = 50
-const SCENE_FOUR_EMPTY_PERCENT = 20
+const SCENE_FOUR_DEFAULT_EMPTY_PERCENT = 20
+const SCENE_FOUR_MIN_EMPTY_PERCENT = 5
+const SCENE_FOUR_MAX_EMPTY_PERCENT = 45
 
 const ROUNDS: RoundConfig[] = [
-  { id: 0, label: 'Scene 0', size: 4, tolerance: 0.26, targetSegregation: 100, blueCount: 1, orangeCount: 4 },
+  { id: 0, label: 'Scene 0', size: 4, tolerance: 0.26, targetSegregation: 100, blueCount: 2, orangeCount: 4 },
   { id: 1, label: 'Scene 1', size: 8, tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
   { id: 2, label: 'Scene 2', size: 8, tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
   { id: 3, label: 'Scene 3', size: 8, tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
@@ -288,49 +290,69 @@ const createSceneZeroBoard = (round: RoundConfig): Board => {
   const board = Array.from({ length: round.size }, () =>
     Array.from({ length: round.size }, () => null as Cell),
   )
-  const variants: Array<{ blue: Position; oranges: Position[] }> = [
+  const variants: Array<{ blues: Position[]; oranges: Position[] }> = [
     {
-      blue: { row: 0, col: 0 },
-      oranges: [
+      blues: [
+        { row: 0, col: 0 },
         { row: 0, col: 1 },
+      ],
+      oranges: [
         { row: 0, col: 2 },
+        { row: 0, col: 1 },
         { row: 1, col: 0 },
         { row: 1, col: 1 },
+        { row: 1, col: 2 },
       ],
     },
     {
-      blue: { row: 0, col: round.size - 1 },
-      oranges: [
+      blues: [
+        { row: 0, col: round.size - 1 },
         { row: 0, col: round.size - 2 },
+      ],
+      oranges: [
         { row: 0, col: round.size - 3 },
+        { row: 1, col: round.size - 3 },
         { row: 1, col: round.size - 1 },
         { row: 1, col: round.size - 2 },
+        { row: 0, col: round.size - 2 },
       ],
     },
     {
-      blue: { row: round.size - 1, col: 0 },
-      oranges: [
+      blues: [
+        { row: round.size - 1, col: 0 },
         { row: round.size - 1, col: 1 },
+      ],
+      oranges: [
         { row: round.size - 1, col: 2 },
+        { row: round.size - 2, col: 2 },
         { row: round.size - 2, col: 0 },
         { row: round.size - 2, col: 1 },
+        { row: round.size - 1, col: 1 },
       ],
     },
     {
-      blue: { row: round.size - 1, col: round.size - 1 },
-      oranges: [
+      blues: [
+        { row: round.size - 1, col: round.size - 1 },
         { row: round.size - 1, col: round.size - 2 },
+      ],
+      oranges: [
         { row: round.size - 1, col: round.size - 3 },
+        { row: round.size - 2, col: round.size - 3 },
         { row: round.size - 2, col: round.size - 1 },
         { row: round.size - 2, col: round.size - 2 },
+        { row: round.size - 1, col: round.size - 2 },
       ],
     },
   ]
 
   const variant = variants[Math.floor(Math.random() * variants.length)]
-  board[variant.blue.row][variant.blue.col] = 'blue'
+  for (const blue of variant.blues) {
+    board[blue.row][blue.col] = 'blue'
+  }
   for (const orange of variant.oranges) {
-    board[orange.row][orange.col] = 'orange'
+    if (board[orange.row][orange.col] === null) {
+      board[orange.row][orange.col] = 'orange'
+    }
   }
 
   return board
@@ -424,6 +446,7 @@ function App() {
   const [sceneThreeMinLike, setSceneThreeMinLike] = useState(SCENE_THREE_MIN_DEFAULT)
   const [sceneThreeMaxLike, setSceneThreeMaxLike] = useState(SCENE_THREE_MAX_DEFAULT)
   const [sceneFourBlueShare, setSceneFourBlueShare] = useState(SCENE_FOUR_DEFAULT_BLUE_SHARE)
+  const [sceneFourEmptyPercent, setSceneFourEmptyPercent] = useState(SCENE_FOUR_DEFAULT_EMPTY_PERCENT)
   const [board, setBoard] = useState<Board>(() =>
     createPlayableRoundBoard(
       ROUNDS[0],
@@ -444,8 +467,8 @@ function App() {
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
   const activeRound = useMemo(
-    () => roundWithComposition(round, sceneFourBlueShare, SCENE_FOUR_EMPTY_PERCENT),
-    [round, sceneFourBlueShare],
+    () => roundWithComposition(round, sceneFourBlueShare, sceneFourEmptyPercent),
+    [round, sceneFourBlueShare, sceneFourEmptyPercent],
   )
   const effectivePreference = useMemo(
     () => preferenceForRound(activeRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike),
@@ -457,7 +480,7 @@ function App() {
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
   const targetMarkerLeft = Math.max(2, Math.min(98, activeRound.targetSegregation))
   const sceneZeroActive = round.id === SCENE_ZERO_ID
-  const sceneFourOccupiedPercent = 100 - SCENE_FOUR_EMPTY_PERCENT
+  const sceneFourOccupiedPercent = 100 - sceneFourEmptyPercent
   const sceneFourBluePercent = (sceneFourOccupiedPercent * sceneFourBlueShare) / 100
   const sceneFourOrangePercent = sceneFourOccupiedPercent - sceneFourBluePercent
   const sceneFourOrangeShare = 100 - sceneFourBlueShare
@@ -510,7 +533,7 @@ function App() {
     if (activeRound.id === SCENE_ZERO_ID) {
       setHint('Drag the unhappy block to any empty home.')
     } else if (isDiversityScene(activeRound.id)) {
-      setHint('Segregated start loaded. Press Play to watch reshuffling.')
+      setHint('Segregated start loaded. Press Start to watch reshuffling.')
     } else {
       setHint('Random start loaded. Watch the pulse, then move.')
     }
@@ -524,7 +547,7 @@ function App() {
 
   const loadRound = useCallback((index: number): void => {
     const baseRound = ROUNDS[index]
-    const nextRound = roundWithComposition(baseRound, sceneFourBlueShare, SCENE_FOUR_EMPTY_PERCENT)
+    const nextRound = roundWithComposition(baseRound, sceneFourBlueShare, sceneFourEmptyPercent)
     const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
     setRoundIndex(index)
     setRunning(false)
@@ -533,7 +556,7 @@ function App() {
     if (nextRound.id === SCENE_ZERO_ID) {
       setHint('Scene 0 ready. Drag the unhappy block to an empty home.')
     } else if (isDiversityScene(nextRound.id)) {
-      setHint(`${nextRound.label} starts segregated. Press Play.`)
+      setHint(`${nextRound.label} starts segregated. Press Start.`)
     } else {
       setHint(`${nextRound.label} ready.`)
     }
@@ -543,7 +566,7 @@ function App() {
     setDragSource(null)
     setDragTargetKey(null)
     completionShownRef.current = false
-  }, [roundTwoBias, sceneFourBlueShare, sceneThreeMaxLike, sceneThreeMinLike])
+  }, [roundTwoBias, sceneFourBlueShare, sceneFourEmptyPercent, sceneThreeMaxLike, sceneThreeMinLike])
 
   const handleSceneZeroDrop = useCallback((target: Position): void => {
     if (!sceneZeroActive || !dragSource) {
@@ -710,6 +733,7 @@ function App() {
                     : streak >= 4
                       ? 'unhappy-pulse-medium'
                       : 'unhappy-pulse-light'
+                const unhappyGlowClass = unhappy ? 'ring-2 ring-rose-400/70 ring-offset-1' : ''
                 const trailClass = moveTrail && (moveTrail.from === key || moveTrail.to === key) ? 'trail-glow tile-pop' : ''
                 const dragClass = isSource
                   ? 'ring-2 ring-slate-900 ring-offset-1'
@@ -719,7 +743,7 @@ function App() {
                 return (
                   <div
                     key={`cell-${rowIndex}-${colIndex}`}
-                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${trailClass} ${dragClass}`}
+                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${unhappyGlowClass} ${trailClass} ${dragClass}`}
                     onPointerDown={(event) => {
                       if (!sceneZeroActive) {
                         return
@@ -772,7 +796,7 @@ function App() {
                 const value = Number(event.target.value)
                 setRoundTwoBias(value)
                 setRunning(false)
-                setHint(`Scene 2 bias set to ${value}%. Remix or press Play.`)
+                setHint(`Scene 2 bias set to ${value}%. Remix or press Start.`)
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
             />
@@ -839,7 +863,7 @@ function App() {
           <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100/80 px-2 py-2">
             <div className="flex items-center justify-between text-[11px] font-semibold text-slate-800">
               <span>orange:blue ratio {sceneFourOrangeShare}:{sceneFourBlueShare}</span>
-              <span>empty {SCENE_FOUR_EMPTY_PERCENT}%</span>
+              <span>empty {sceneFourEmptyPercent}%</span>
             </div>
             <div className="relative mt-2 h-3 overflow-hidden rounded-full border border-slate-300 bg-slate-200">
               <span
@@ -852,8 +876,12 @@ function App() {
               />
               <span
                 className="absolute inset-y-0 right-0 bg-slate-900"
-                style={{ width: `${SCENE_FOUR_EMPTY_PERCENT}%` }}
+                style={{ width: `${sceneFourEmptyPercent}%` }}
               />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
+              <span>blue share</span>
+              <span>{sceneFourBlueShare}%</span>
             </div>
             <input
               type="range"
@@ -866,16 +894,46 @@ function App() {
                 setSceneFourBlueShare(value)
                 setRunning(false)
                 setTurns(0)
-                const nextRound = roundWithComposition(round, value, SCENE_FOUR_EMPTY_PERCENT)
+                const nextRound = roundWithComposition(round, value, sceneFourEmptyPercent)
                 const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
                 setBoard(createPlayableRoundBoard(nextRound, nextPreference))
                 setShowRoundSummary(false)
                 setMoveTrail(null)
                 setUnhappyStreaks({})
+                setDragSource(null)
+                setDragTargetKey(null)
                 completionShownRef.current = false
-                setHint(`Scene 4 mix set to ${100 - value}:${value} with ${SCENE_FOUR_EMPTY_PERCENT}% empty.`)
+                setHint(`Scene 4 mix set to ${100 - value}:${value} with ${sceneFourEmptyPercent}% empty.`)
               }}
               className="mt-2 h-2 w-full cursor-pointer accent-slate-700"
+            />
+            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
+              <span>empty homes</span>
+              <span>{sceneFourEmptyPercent}%</span>
+            </div>
+            <input
+              type="range"
+              min={SCENE_FOUR_MIN_EMPTY_PERCENT}
+              max={SCENE_FOUR_MAX_EMPTY_PERCENT}
+              step={1}
+              value={sceneFourEmptyPercent}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setSceneFourEmptyPercent(value)
+                setRunning(false)
+                setTurns(0)
+                const nextRound = roundWithComposition(round, sceneFourBlueShare, value)
+                const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
+                setBoard(createPlayableRoundBoard(nextRound, nextPreference))
+                setShowRoundSummary(false)
+                setMoveTrail(null)
+                setUnhappyStreaks({})
+                setDragSource(null)
+                setDragTargetKey(null)
+                completionShownRef.current = false
+                setHint(`Scene 4 empty homes set to ${value}%.`)
+              }}
+              className="mt-1 h-2 w-full cursor-pointer accent-slate-700"
             />
           </div>
         )}
@@ -907,7 +965,7 @@ function App() {
               onClick={() => setRunning((value) => !value)}
               className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
             >
-              {running ? 'Pause' : 'Play'}
+              {running ? 'Pause' : 'Start'}
             </button>
             <button
               type="button"
@@ -978,7 +1036,7 @@ function App() {
                 onClick={() => {
                   setShowIntro(false)
                   setRunning(false)
-                  setHint('Use Play to watch movement unfold.')
+                  setHint('Use Start to watch movement unfold.')
                 }}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
