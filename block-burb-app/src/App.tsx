@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import AdvancedGame from './AdvancedGame'
 
-type Mode = 'core' | 'advanced'
 type AgentColor = 'blue' | 'orange'
 type Cell = AgentColor | null
 type Board = Cell[][]
@@ -168,6 +166,30 @@ const analyzeBoard = (board: Board, tolerance: number): BoardAnalysis => {
   return { unhappyCount, totalAgents, segregation, unhappyKeys }
 }
 
+const minimumUnhappyForRound = (round: RoundConfig): number =>
+  Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
+
+const createPlayableRoundBoard = (round: RoundConfig): Board => {
+  let bestUnsolvedBoard: Board | null = null
+  let bestUnhappy = -1
+
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const candidate = createRoundBoard(round)
+    const analysis = analyzeBoard(candidate, round.tolerance)
+
+    if (analysis.unhappyCount > 0 && analysis.unhappyCount > bestUnhappy) {
+      bestUnsolvedBoard = candidate
+      bestUnhappy = analysis.unhappyCount
+    }
+
+    if (analysis.unhappyCount >= minimumUnhappyForRound(round)) {
+      return candidate
+    }
+  }
+
+  return bestUnsolvedBoard ?? createRoundBoard(round)
+}
+
 const collectVacancies = (board: Board): Position[] => {
   const vacancies: Position[] = []
   for (let row = 0; row < BOARD_SIZE; row += 1) {
@@ -218,9 +240,8 @@ const isRoundCompleted = (analysis: BoardAnalysis, round: RoundConfig): boolean 
   analysis.unhappyCount === 0 && analysis.segregation <= round.targetSegregation
 
 function App() {
-  const [mode, setMode] = useState<Mode>('core')
   const [roundIndex, setRoundIndex] = useState(0)
-  const [board, setBoard] = useState<Board>(() => createRoundBoard(ROUNDS[0]))
+  const [board, setBoard] = useState<Board>(() => createPlayableRoundBoard(ROUNDS[0]))
   const [running, setRunning] = useState(false)
   const [turns, setTurns] = useState(0)
   const [hint, setHint] = useState('Unhappy households pulse. Press Play to watch movement.')
@@ -233,7 +254,7 @@ function App() {
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
   const analysis = useMemo(() => analyzeBoard(board, round.tolerance), [board, round.tolerance])
-  const completed = isRoundCompleted(analysis, round)
+  const completed = turns > 0 && isRoundCompleted(analysis, round)
   const segregationAlert = analysis.segregation > round.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
   const targetMarkerLeft = Math.max(2, Math.min(98, round.targetSegregation))
@@ -282,7 +303,7 @@ function App() {
   const resetRound = useCallback((): void => {
     setRunning(false)
     setTurns(0)
-    setBoard(createRoundBoard(round))
+    setBoard(createPlayableRoundBoard(round))
     setHint('Random start loaded. Watch the pulse, then move.')
     setShowRoundSummary(false)
     setMoveTrail(null)
@@ -295,7 +316,7 @@ function App() {
     setRoundIndex(index)
     setRunning(false)
     setTurns(0)
-    setBoard(createRoundBoard(nextRound))
+    setBoard(createPlayableRoundBoard(nextRound))
     setHint(`${nextRound.label} layout ready.`)
     setShowRoundSummary(false)
     setMoveTrail(null)
@@ -360,48 +381,21 @@ function App() {
     loadRound(roundIndex + 1)
   }
 
-  if (mode === 'advanced') {
-    return (
-      <div className="relative">
-        <button
-          type="button"
-          onClick={() => setMode('core')}
-          className="fixed left-4 top-4 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-800 shadow"
-        >
-          Back To Core Lab
-        </button>
-        <AdvancedGame />
-      </div>
-    )
-  }
-
   return (
     <main className="relative min-h-screen bg-[radial-gradient(circle_at_10%_10%,#d9edff_0%,transparent_42%),radial-gradient(circle_at_90%_90%,#ffe7d3_0%,transparent_36%),linear-gradient(180deg,#f9fbff_0%,#edf2f8_100%)] px-3 pb-10 pt-4">
       <section className="mx-auto w-full max-w-md rounded-2xl border border-white/80 bg-white/92 p-3 shadow-[0_18px_40px_rgba(16,24,40,0.12)] backdrop-blur">
         <header className="flex items-center justify-between">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Core Lab</p>
-            <h1 className="text-xl font-semibold text-slate-900">Block 'Burb</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowIntro(true)
-                setRunning(false)
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
-            >
-              How
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('advanced')}
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
-            >
-              Advanced
-            </button>
-          </div>
+          <h1 className="text-lg font-semibold text-slate-900">Block 'Burb</h1>
+          <button
+            type="button"
+            onClick={() => {
+              setShowIntro(true)
+              setRunning(false)
+            }}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+          >
+            How
+          </button>
         </header>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
