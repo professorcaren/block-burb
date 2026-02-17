@@ -41,7 +41,7 @@ const ROUND_TWO_MAX_BIAS = 60
 const ROUND_TWO_DEFAULT_BIAS = 33
 
 const ROUNDS: RoundConfig[] = [
-  { id: 1, label: 'Easy', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
+  { id: 1, label: 'Start', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
   { id: 2, label: 'Mid', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
   { id: 3, label: 'Hard', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
 ]
@@ -170,23 +170,32 @@ const analyzeBoard = (board: Board, tolerance: number): BoardAnalysis => {
   return { unhappyCount, totalAgents, segregation, unhappyKeys }
 }
 
-const minimumUnhappyForRound = (round: RoundConfig): number =>
-  Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
+const minimumUnhappyForRound = (round: RoundConfig): number => {
+  if (round.id === 1) {
+    return 1
+  }
+  if (round.id === ROUND_TWO_ID) {
+    return Math.max(6, Math.round((round.blueCount + round.orangeCount) * 0.12))
+  }
+  return Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
+}
 
 const toleranceForRound = (round: RoundConfig, roundTwoBias: number): number =>
   round.id === ROUND_TWO_ID ? roundTwoBias / 100 : round.tolerance
 
 const createPlayableRoundBoard = (round: RoundConfig, tolerance: number): Board => {
-  let bestUnsolvedBoard: Board | null = null
-  let bestUnhappy = -1
+  let firstCandidate: Board | null = null
+  let firstUnhappyCandidate: Board | null = null
 
-  for (let attempt = 0; attempt < 240; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const candidate = createRoundBoard(round)
     const analysis = analyzeBoard(candidate, tolerance)
+    if (firstCandidate === null) {
+      firstCandidate = candidate
+    }
 
-    if (analysis.unhappyCount > 0 && analysis.unhappyCount > bestUnhappy) {
-      bestUnsolvedBoard = candidate
-      bestUnhappy = analysis.unhappyCount
+    if (analysis.unhappyCount > 0 && firstUnhappyCandidate === null) {
+      firstUnhappyCandidate = candidate
     }
 
     if (analysis.unhappyCount >= minimumUnhappyForRound(round)) {
@@ -194,7 +203,7 @@ const createPlayableRoundBoard = (round: RoundConfig, tolerance: number): Board 
     }
   }
 
-  return bestUnsolvedBoard ?? createRoundBoard(round)
+  return firstUnhappyCandidate ?? firstCandidate ?? createRoundBoard(round)
 }
 
 const collectVacancies = (board: Board): Position[] => {
@@ -462,7 +471,7 @@ function App() {
               className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
             />
             <p className="mt-1 text-[11px] text-amber-900">
-              Small individual bias can create big collective segregation. 33% is the tipping edge; 50% segregates fast.
+              Small individual bias can create big collective segregation. Adjust the slider and watch what emerges.
             </p>
           </div>
         )}
