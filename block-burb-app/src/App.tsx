@@ -39,7 +39,6 @@ interface PreferenceRule {
 }
 
 const STEP_DELAY_MS = 360
-const GITHUB_REPO_URL = 'https://github.com/professorcaren/block-burb'
 const SCENE_ZERO_ID = 0
 const SCENE_TWO_ID = 2
 const SCENE_TWO_MIN_BIAS = 20
@@ -491,7 +490,8 @@ function App() {
     [activeRound, roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike],
   )
   const analysis = useMemo(() => analyzeBoard(board, effectivePreference), [board, effectivePreference])
-  const completed = turns > 0 && isRoundCompleted(analysis, activeRound)
+  const settled = turns > 0 && analysis.unhappyCount === 0
+  const completed = settled && isRoundCompleted(analysis, activeRound)
   const segregationAlert = analysis.segregation > activeRound.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
   const targetMarkerLeft = Math.max(2, Math.min(98, activeRound.targetSegregation))
@@ -521,7 +521,7 @@ function App() {
   }, [moveTrail])
 
   useEffect(() => {
-    if (!completed) {
+    if (!settled) {
       completionShownRef.current = false
       return
     }
@@ -533,15 +533,17 @@ function App() {
     completionShownRef.current = true
     setRunning(false)
     setShowRoundSummary(true)
-    setClearedRounds((previous) => {
-      if (previous[roundIndex]) {
-        return previous
-      }
-      const next = [...previous]
-      next[roundIndex] = true
-      return next
-    })
-  }, [completed, roundIndex])
+    if (completed) {
+      setClearedRounds((previous) => {
+        if (previous[roundIndex]) {
+          return previous
+        }
+        const next = [...previous]
+        next[roundIndex] = true
+        return next
+      })
+    }
+  }, [settled, completed, roundIndex])
 
   const resetRound = useCallback((): void => {
     setRunning(false)
@@ -631,8 +633,13 @@ function App() {
       return
     }
 
+    if (!dragSource) {
+      setHint('Tap a colored block first, then tap an empty space.')
+      return
+    }
+
     handleSceneZeroDrop(position)
-  }, [board, handleSceneZeroDrop, sceneZeroActive])
+  }, [board, dragSource, handleSceneZeroDrop, sceneZeroActive])
 
   const runStep = useCallback(
     (fromAuto = false): boolean => {
@@ -732,6 +739,9 @@ function App() {
                 style={{ left: `calc(${targetMarkerLeft}% - 1px)` }}
               />
             </div>
+            {!sceneZeroActive && (
+              <p className="mt-0.5 text-[9px] text-slate-400">Target ≤{activeRound.targetSegregation}%</p>
+            )}
           </div>
         </div>
 
@@ -759,6 +769,7 @@ function App() {
                     ? 'ring-4 ring-rose-500/90 ring-offset-1'
                     : 'ring-2 ring-rose-400/70 ring-offset-1'
                 const trailClass = moveTrail && (moveTrail.from === key || moveTrail.to === key) ? 'trail-glow tile-pop' : ''
+                const happyDimClass = !sceneZeroActive && cell !== null && !unhappy ? 'opacity-[0.6]' : ''
                 const dragClass = isSource
                   ? 'ring-2 ring-slate-900 ring-offset-1'
                   : isDragTarget
@@ -767,7 +778,7 @@ function App() {
                 return (
                   <div
                     key={`cell-${rowIndex}-${colIndex}`}
-                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${unhappyGlowClass} ${trailClass} ${dragClass}`}
+                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${unhappyGlowClass} ${trailClass} ${dragClass} ${happyDimClass}`}
                     onPointerDown={(event) => {
                       if (!sceneZeroActive) {
                         return
@@ -837,7 +848,7 @@ function App() {
         )}
 
         {isDiversityScene(round.id) && (
-          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-2">
+          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-1.5">
             <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
               <span>Diversity Range</span>
               <span>{sceneThreeMinLike}% - {sceneThreeMaxLike}% alike</span>
@@ -861,7 +872,7 @@ function App() {
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
             />
-            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-800/90">
+            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-800/90">
               <span>Maximum alike</span>
               <span>{sceneThreeMaxLike}%</span>
             </div>
@@ -880,7 +891,7 @@ function App() {
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
             />
-            <div className="relative mt-2 h-2 rounded-full bg-slate-200">
+            <div className="relative mt-1 h-2 rounded-full bg-slate-200">
               <span
                 className="absolute inset-y-0 rounded-full bg-emerald-500/75"
                 style={{
@@ -893,12 +904,12 @@ function App() {
         )}
 
         {round.id === SCENE_FOUR_ID && (
-          <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100/80 px-2 py-2">
+          <div className="mt-2 rounded-lg border border-slate-300 bg-slate-100/80 px-2 py-1.5">
             <div className="flex items-center justify-between text-[11px] font-semibold text-slate-800">
               <span>orange:blue ratio {sceneFourOrangeShare}:{sceneFourBlueShare}</span>
               <span>empty {sceneFourEmptyPercent}%</span>
             </div>
-            <div className="relative mt-2 h-3 overflow-hidden rounded-full border border-slate-300 bg-slate-200">
+            <div className="relative mt-1.5 h-3 overflow-hidden rounded-full border border-slate-300 bg-slate-200">
               <span
                 className="absolute inset-y-0 left-0 bg-[#d97a2f]"
                 style={{ width: `${sceneFourOrangePercent}%` }}
@@ -912,7 +923,7 @@ function App() {
                 style={{ width: `${sceneFourEmptyPercent}%` }}
               />
             </div>
-            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
+            <div className="mt-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
               <span>blue share</span>
               <span>{sceneFourBlueShare}%</span>
             </div>
@@ -938,9 +949,9 @@ function App() {
                 completionShownRef.current = false
                 setHint(`Scene 4 mix set to ${100 - value}:${value} with ${sceneFourEmptyPercent}% empty.`)
               }}
-              className="mt-2 h-2 w-full cursor-pointer accent-slate-700"
+              className="mt-1 h-2 w-full cursor-pointer accent-slate-700"
             />
-            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
+            <div className="mt-1.5 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-700">
               <span>empty homes</span>
               <span>{sceneFourEmptyPercent}%</span>
             </div>
@@ -978,10 +989,12 @@ function App() {
               onClick={() => {
                 setDragSource(null)
                 setDragTargetKey(null)
+                setHint('Selection cleared. Tap an unhappy block to start.')
               }}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+              disabled={!dragSource}
+              className={`rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium ${dragSource ? 'text-slate-700' : 'text-slate-300'}`}
             >
-              Clear Drag
+              Cancel
             </button>
             <button
               type="button"
@@ -1042,16 +1055,6 @@ function App() {
 
         <p className="mt-2 text-center text-xs text-slate-600">{hint}</p>
 
-        <div className="mt-2 text-center text-[11px] text-slate-500">
-          <a
-            href={GITHUB_REPO_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="font-semibold text-sky-700 underline underline-offset-2"
-          >
-            About / Repository
-          </a>
-        </div>
       </section>
 
       {showWelcome && (
@@ -1059,8 +1062,8 @@ function App() {
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Welcome</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Block 'Burb</h2>
-            <p className="mt-2 text-sm text-slate-700">Block 'Burb lets you explore how neighborhood preferences shape city patterns.</p>
-            <p className="mt-2 text-sm text-slate-700">Small local choices can produce big collective outcomes.</p>
+            <p className="mt-2 text-sm text-slate-700">Each colored block is a household in a neighborhood. Unhappy households want to move.</p>
+            <p className="mt-2 text-sm text-slate-700">Watch how small local preferences produce big collective patterns.</p>
             <button
               type="button"
               onClick={() => {
@@ -1122,12 +1125,17 @@ function App() {
       {showRoundSummary && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Scene Complete</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-900">{round.label} cleared in {turns} turns</h2>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{completed ? 'Scene Complete' : 'Everyone Happy'}</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">{round.label} {completed ? 'cleared' : 'settled'} in {turns} turns</h2>
             <p className="mt-2 text-sm text-slate-700">
               Final segregation: <span className={segregationAlert ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}>{analysis.segregation}%</span>
               {' '}with {analysis.totalAgents} households.
             </p>
+            {!completed && segregationAlert && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-sm text-amber-800">
+                Everyone is happy, but the neighborhood ended up segregated. Small preferences led to a big pattern.
+              </p>
+            )}
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
