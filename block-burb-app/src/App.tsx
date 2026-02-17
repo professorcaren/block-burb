@@ -7,6 +7,7 @@ type Board = Cell[][]
 interface RoundConfig {
   id: number
   label: string
+  size: number
   tolerance: number
   targetSegregation: number
   blueCount: number
@@ -37,9 +38,9 @@ interface PreferenceRule {
   maxLike: number
 }
 
-const BOARD_SIZE = 8
 const STEP_DELAY_MS = 360
 const GITHUB_REPO_URL = 'https://github.com/professorcaren/block-burb'
+const SCENE_ZERO_ID = 0
 const SCENE_TWO_ID = 2
 const SCENE_TWO_MIN_BIAS = 20
 const SCENE_TWO_MAX_BIAS = 60
@@ -53,10 +54,11 @@ const SCENE_FOUR_DEFAULT_BLUE_SHARE = 50
 const SCENE_FOUR_EMPTY_PERCENT = 20
 
 const ROUNDS: RoundConfig[] = [
-  { id: 1, label: 'Scene 1', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
-  { id: 2, label: 'Scene 2', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
-  { id: 3, label: 'Scene 3', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
-  { id: 4, label: 'Scene 4', tolerance: 0.56, targetSegregation: 52, blueCount: 25, orangeCount: 25 },
+  { id: 0, label: 'Scene 0', size: 4, tolerance: 0.26, targetSegregation: 100, blueCount: 1, orangeCount: 4 },
+  { id: 1, label: 'Scene 1', size: 8, tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
+  { id: 2, label: 'Scene 2', size: 8, tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
+  { id: 3, label: 'Scene 3', size: 8, tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
+  { id: 4, label: 'Scene 4', size: 8, tolerance: 0.56, targetSegregation: 52, blueCount: 25, orangeCount: 25 },
 ]
 
 const neighborOffsets: Position[] = [
@@ -77,8 +79,8 @@ const adjacencyOffsets: Position[] = [
   { row: 1, col: -1 },
 ]
 
-const inBounds = (row: number, col: number): boolean =>
-  row >= 0 && col >= 0 && row < BOARD_SIZE && col < BOARD_SIZE
+const inBounds = (row: number, col: number, size: number): boolean =>
+  row >= 0 && col >= 0 && row < size && col < size
 
 const keyFor = (position: Position): string => `${position.row}:${position.col}`
 const isDiversityScene = (sceneId: number): boolean => sceneId === SCENE_THREE_ID || sceneId === SCENE_FOUR_ID
@@ -93,19 +95,19 @@ const shuffle = <T,>(items: T[]): T[] => {
 }
 
 const createRoundBoard = (round: RoundConfig): Board => {
-  const board = Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null as Cell),
+  const board = Array.from({ length: round.size }, () =>
+    Array.from({ length: round.size }, () => null as Cell),
   )
 
   const placements = shuffle([
     ...Array.from({ length: round.blueCount }, () => 'blue' as const),
     ...Array.from({ length: round.orangeCount }, () => 'orange' as const),
-    ...Array.from({ length: BOARD_SIZE * BOARD_SIZE - round.blueCount - round.orangeCount }, () => null as Cell),
+    ...Array.from({ length: round.size * round.size - round.blueCount - round.orangeCount }, () => null as Cell),
   ])
 
   let index = 0
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let row = 0; row < round.size; row += 1) {
+    for (let col = 0; col < round.size; col += 1) {
       board[row][col] = placements[index]
       index += 1
     }
@@ -117,14 +119,15 @@ const createRoundBoard = (round: RoundConfig): Board => {
 const cloneBoard = (board: Board): Board => board.map((row) => [...row])
 
 const analyzeBoard = (board: Board, preference: PreferenceRule): BoardAnalysis => {
+  const size = board.length
   let unhappyCount = 0
   let totalAgents = 0
   let sameAdjacency = 0
   let mixedAdjacency = 0
   const unhappyKeys = new Set<string>()
 
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let row = 0; row < size; row += 1) {
+    for (let col = 0; col < size; col += 1) {
       const current = board[row][col]
       if (current === null) {
         continue
@@ -137,7 +140,7 @@ const analyzeBoard = (board: Board, preference: PreferenceRule): BoardAnalysis =
       for (const offset of neighborOffsets) {
         const nextRow = row + offset.row
         const nextCol = col + offset.col
-        if (!inBounds(nextRow, nextCol)) {
+        if (!inBounds(nextRow, nextCol, size)) {
           continue
         }
 
@@ -164,7 +167,7 @@ const analyzeBoard = (board: Board, preference: PreferenceRule): BoardAnalysis =
       for (const offset of adjacencyOffsets) {
         const nextRow = row + offset.row
         const nextCol = col + offset.col
-        if (!inBounds(nextRow, nextCol)) {
+        if (!inBounds(nextRow, nextCol, size)) {
           continue
         }
 
@@ -207,7 +210,7 @@ const roundWithComposition = (
     return round
   }
 
-  const totalCells = BOARD_SIZE * BOARD_SIZE
+  const totalCells = round.size * round.size
   const targetOccupied = Math.max(2, Math.round(((100 - emptyPercent) / 100) * totalCells))
   const occupied = targetOccupied % 2 === 0 ? targetOccupied : targetOccupied - 1
   const blueCount = Math.max(1, Math.min(occupied - 1, Math.round((blueSharePercent / 100) * occupied)))
@@ -238,15 +241,15 @@ const preferenceForRound = (
 }
 
 const createSegregatedSceneBoard = (round: RoundConfig): Board => {
-  const board = Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null as Cell),
+  const board = Array.from({ length: round.size }, () =>
+    Array.from({ length: round.size }, () => null as Cell),
   )
   const leftZone: Position[] = []
   const rightZone: Position[] = []
-  const split = Math.floor(BOARD_SIZE / 2)
+  const split = Math.floor(round.size / 2)
 
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let row = 0; row < round.size; row += 1) {
+    for (let col = 0; col < round.size; col += 1) {
       if (col < split) {
         leftZone.push({ row, col })
       } else {
@@ -281,7 +284,63 @@ const createSegregatedSceneBoard = (round: RoundConfig): Board => {
   return board
 }
 
+const createSceneZeroBoard = (round: RoundConfig): Board => {
+  const board = Array.from({ length: round.size }, () =>
+    Array.from({ length: round.size }, () => null as Cell),
+  )
+  const variants: Array<{ blue: Position; oranges: Position[] }> = [
+    {
+      blue: { row: 0, col: 0 },
+      oranges: [
+        { row: 0, col: 1 },
+        { row: 0, col: 2 },
+        { row: 1, col: 0 },
+        { row: 1, col: 1 },
+      ],
+    },
+    {
+      blue: { row: 0, col: round.size - 1 },
+      oranges: [
+        { row: 0, col: round.size - 2 },
+        { row: 0, col: round.size - 3 },
+        { row: 1, col: round.size - 1 },
+        { row: 1, col: round.size - 2 },
+      ],
+    },
+    {
+      blue: { row: round.size - 1, col: 0 },
+      oranges: [
+        { row: round.size - 1, col: 1 },
+        { row: round.size - 1, col: 2 },
+        { row: round.size - 2, col: 0 },
+        { row: round.size - 2, col: 1 },
+      ],
+    },
+    {
+      blue: { row: round.size - 1, col: round.size - 1 },
+      oranges: [
+        { row: round.size - 1, col: round.size - 2 },
+        { row: round.size - 1, col: round.size - 3 },
+        { row: round.size - 2, col: round.size - 1 },
+        { row: round.size - 2, col: round.size - 2 },
+      ],
+    },
+  ]
+
+  const variant = variants[Math.floor(Math.random() * variants.length)]
+  board[variant.blue.row][variant.blue.col] = 'blue'
+  for (const orange of variant.oranges) {
+    board[orange.row][orange.col] = 'orange'
+  }
+
+  return board
+}
+
 const createPlayableRoundBoard = (round: RoundConfig, preference: PreferenceRule): Board => {
+  if (round.id === SCENE_ZERO_ID) {
+    return createSceneZeroBoard(round)
+  }
+
   if (isDiversityScene(round.id)) {
     return createSegregatedSceneBoard(round)
   }
@@ -310,8 +369,8 @@ const createPlayableRoundBoard = (round: RoundConfig, preference: PreferenceRule
 
 const collectVacancies = (board: Board): Position[] => {
   const vacancies: Position[] = []
-  for (let row = 0; row < BOARD_SIZE; row += 1) {
-    for (let col = 0; col < BOARD_SIZE; col += 1) {
+  for (let row = 0; row < board.length; row += 1) {
+    for (let col = 0; col < board[row].length; col += 1) {
       if (board[row][col] === null) {
         vacancies.push({ row, col })
       }
@@ -355,7 +414,9 @@ const cellClass = (cell: Cell): string => {
 }
 
 const isRoundCompleted = (analysis: BoardAnalysis, round: RoundConfig): boolean =>
-  analysis.unhappyCount === 0 && analysis.segregation <= round.targetSegregation
+  round.id === SCENE_ZERO_ID
+    ? analysis.unhappyCount === 0
+    : analysis.unhappyCount === 0 && analysis.segregation <= round.targetSegregation
 
 function App() {
   const [roundIndex, setRoundIndex] = useState(0)
@@ -371,12 +432,14 @@ function App() {
   )
   const [running, setRunning] = useState(false)
   const [turns, setTurns] = useState(0)
-  const [hint, setHint] = useState('Unhappy households pulse. Press Play to watch movement.')
+  const [hint, setHint] = useState('Scene 0: drag the unhappy block to an empty home.')
   const [showIntro, setShowIntro] = useState(true)
   const [showRoundSummary, setShowRoundSummary] = useState(false)
   const [clearedRounds, setClearedRounds] = useState<boolean[]>(Array.from({ length: ROUNDS.length }, () => false))
   const [moveTrail, setMoveTrail] = useState<{ from: string; to: string } | null>(null)
   const [unhappyStreaks, setUnhappyStreaks] = useState<Record<string, number>>({})
+  const [dragSource, setDragSource] = useState<Position | null>(null)
+  const [dragTargetKey, setDragTargetKey] = useState<string | null>(null)
 
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
@@ -393,6 +456,7 @@ function App() {
   const segregationAlert = analysis.segregation > activeRound.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
   const targetMarkerLeft = Math.max(2, Math.min(98, activeRound.targetSegregation))
+  const sceneZeroActive = round.id === SCENE_ZERO_ID
   const sceneFourOccupiedPercent = 100 - SCENE_FOUR_EMPTY_PERCENT
   const sceneFourBluePercent = (sceneFourOccupiedPercent * sceneFourBlueShare) / 100
   const sceneFourOrangePercent = sceneFourOccupiedPercent - sceneFourBluePercent
@@ -443,7 +507,9 @@ function App() {
     setRunning(false)
     setTurns(0)
     setBoard(createPlayableRoundBoard(activeRound, effectivePreference))
-    if (isDiversityScene(activeRound.id)) {
+    if (activeRound.id === SCENE_ZERO_ID) {
+      setHint('Drag the unhappy block to any empty home.')
+    } else if (isDiversityScene(activeRound.id)) {
       setHint('Segregated start loaded. Press Play to watch reshuffling.')
     } else {
       setHint('Random start loaded. Watch the pulse, then move.')
@@ -451,6 +517,8 @@ function App() {
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
+    setDragSource(null)
+    setDragTargetKey(null)
     completionShownRef.current = false
   }, [activeRound, effectivePreference])
 
@@ -462,7 +530,9 @@ function App() {
     setRunning(false)
     setTurns(0)
     setBoard(createPlayableRoundBoard(nextRound, nextPreference))
-    if (isDiversityScene(nextRound.id)) {
+    if (nextRound.id === SCENE_ZERO_ID) {
+      setHint('Scene 0 ready. Drag the unhappy block to an empty home.')
+    } else if (isDiversityScene(nextRound.id)) {
       setHint(`${nextRound.label} starts segregated. Press Play.`)
     } else {
       setHint(`${nextRound.label} ready.`)
@@ -470,8 +540,58 @@ function App() {
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
+    setDragSource(null)
+    setDragTargetKey(null)
     completionShownRef.current = false
   }, [roundTwoBias, sceneFourBlueShare, sceneThreeMaxLike, sceneThreeMinLike])
+
+  const handleSceneZeroDrop = useCallback((target: Position): void => {
+    if (!sceneZeroActive || !dragSource) {
+      return
+    }
+
+    if (dragSource.row === target.row && dragSource.col === target.col) {
+      setDragSource(null)
+      setDragTargetKey(null)
+      return
+    }
+
+    if (board[target.row][target.col] !== null) {
+      return
+    }
+
+    const next = cloneBoard(board)
+    next[target.row][target.col] = next[dragSource.row][dragSource.col]
+    next[dragSource.row][dragSource.col] = null
+    setBoard(next)
+    setTurns((value) => value + 1)
+    setMoveTrail({ from: keyFor(dragSource), to: keyFor(target) })
+    setRunning(false)
+    setDragSource(null)
+    setDragTargetKey(null)
+
+    const nextAnalysis = analyzeBoard(next, effectivePreference)
+    if (nextAnalysis.unhappyCount === 0) {
+      setHint('All households are happy.')
+    } else {
+      setHint('Nice move. Keep dragging to an empty home.')
+    }
+  }, [board, dragSource, effectivePreference, sceneZeroActive])
+
+  const handleSceneZeroCellPress = useCallback((position: Position): void => {
+    if (!sceneZeroActive) {
+      return
+    }
+
+    const cell = board[position.row][position.col]
+    if (cell !== null) {
+      setDragSource(position)
+      setDragTargetKey(null)
+      return
+    }
+
+    handleSceneZeroDrop(position)
+  }, [board, handleSceneZeroDrop, sceneZeroActive])
 
   const runStep = useCallback(
     (fromAuto = false): boolean => {
@@ -510,7 +630,7 @@ function App() {
   )
 
   useEffect(() => {
-    if (!running || showIntro || showRoundSummary) {
+    if (!running || showIntro || showRoundSummary || sceneZeroActive) {
       return
     }
 
@@ -519,7 +639,7 @@ function App() {
     }, STEP_DELAY_MS)
 
     return () => window.clearTimeout(timer)
-  }, [board, runStep, running, showIntro, showRoundSummary])
+  }, [board, runStep, running, sceneZeroActive, showIntro, showRoundSummary])
 
   const goToNextRound = (): void => {
     if (roundIndex >= ROUNDS.length - 1) {
@@ -575,12 +695,14 @@ function App() {
         </div>
 
         <div className="mt-3 rounded-xl border border-slate-200 bg-[#f3f6fb] p-2">
-          <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))` }}>
+          <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${board.length}, minmax(0, 1fr))` }}>
             {board.flatMap((row, rowIndex) =>
               row.map((cell, colIndex) => {
                 const key = keyFor({ row: rowIndex, col: colIndex })
                 const unhappy = analysis.unhappyKeys.has(key)
                 const streak = unhappyStreaks[key] ?? 0
+                const isSource = dragSource !== null && keyFor(dragSource) === key
+                const isDragTarget = dragTargetKey === key
                 const pulseClass = !unhappy
                   ? ''
                   : streak >= 7
@@ -589,10 +711,44 @@ function App() {
                       ? 'unhappy-pulse-medium'
                       : 'unhappy-pulse-light'
                 const trailClass = moveTrail && (moveTrail.from === key || moveTrail.to === key) ? 'trail-glow tile-pop' : ''
+                const dragClass = isSource
+                  ? 'ring-2 ring-slate-900 ring-offset-1'
+                  : isDragTarget
+                    ? 'ring-2 ring-slate-400 ring-offset-1'
+                    : ''
                 return (
                   <div
                     key={`cell-${rowIndex}-${colIndex}`}
-                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${trailClass}`}
+                    className={`relative aspect-square rounded-md border ${cellClass(cell)} ${pulseClass} ${trailClass} ${dragClass}`}
+                    onPointerDown={(event) => {
+                      if (!sceneZeroActive) {
+                        return
+                      }
+                      event.preventDefault()
+                      handleSceneZeroCellPress({ row: rowIndex, col: colIndex })
+                    }}
+                    onPointerEnter={() => {
+                      if (!sceneZeroActive || !dragSource) {
+                        return
+                      }
+                      if (board[rowIndex][colIndex] === null) {
+                        setDragTargetKey(key)
+                      } else {
+                        setDragTargetKey(null)
+                      }
+                    }}
+                    onPointerUp={() => {
+                      if (!sceneZeroActive || !dragSource) {
+                        return
+                      }
+                      handleSceneZeroDrop({ row: rowIndex, col: colIndex })
+                    }}
+                    onPointerLeave={() => {
+                      if (!sceneZeroActive || dragTargetKey !== key) {
+                        return
+                      }
+                      setDragTargetKey(null)
+                    }}
                   />
                 )
               }),
@@ -724,29 +880,51 @@ function App() {
           </div>
         )}
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => setRunning((value) => !value)}
-            className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
-          >
-            {running ? 'Pause' : 'Play'}
-          </button>
-          <button
-            type="button"
-            onClick={() => runStep(false)}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-          >
-            Step
-          </button>
-          <button
-            type="button"
-            onClick={resetRound}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-          >
-            Remix
-          </button>
-        </div>
+        {sceneZeroActive ? (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setDragSource(null)
+                setDragTargetKey(null)
+              }}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+            >
+              Clear Drag
+            </button>
+            <button
+              type="button"
+              onClick={resetRound}
+              className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Remix
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setRunning((value) => !value)}
+              className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            >
+              {running ? 'Pause' : 'Play'}
+            </button>
+            <button
+              type="button"
+              onClick={() => runStep(false)}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+            >
+              Step
+            </button>
+            <button
+              type="button"
+              onClick={resetRound}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+            >
+              Remix
+            </button>
+          </div>
+        )}
 
         <div className="mt-3 flex items-center justify-center gap-2">
           {ROUNDS.map((item, index) => {
@@ -790,6 +968,7 @@ function App() {
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">How It Works</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Watch Sorting Happen</h2>
+            <p className="mt-2 text-sm text-slate-700">Scene 0 is manual: drag the pulsing household to any empty home until everyone is happy.</p>
             <p className="mt-2 text-sm text-slate-700">Scenes 1-2 start random. Unhappy households pulse, then relocate into empty homes.</p>
             <p className="mt-2 text-sm text-slate-700">Scenes 3-4 start segregated and add a diversity range so too little or too much similarity can trigger moves.</p>
             <p className="mt-2 text-sm text-slate-700">Keep segregation at or below the target while getting unhappy households to 0.</p>
@@ -809,8 +988,13 @@ function App() {
                 type="button"
                 onClick={() => {
                   setShowIntro(false)
-                  setRunning(true)
-                  setHint('Simulation running. Watch clusters form.')
+                  if (sceneZeroActive) {
+                    setRunning(false)
+                    setHint('Scene 0: drag the unhappy block to an empty home.')
+                  } else {
+                    setRunning(true)
+                    setHint('Simulation running. Watch clusters form.')
+                  }
                 }}
                 className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
               >
