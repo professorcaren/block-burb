@@ -63,6 +63,14 @@ const ROUNDS: RoundConfig[] = [
   { id: 4, label: 'Scene 4', size: 8, tolerance: 0.56, targetSegregation: 52, blueCount: 25, orangeCount: 25 },
 ]
 
+const SCENE_INTRO_TEXT: Record<number, string> = {
+  0: 'Blocks are unhappy when too few neighbors are similar. Drag blocks until everyone is happy.',
+  1: 'Scene 1 adds auto-movement so mild local preferences can create citywide patterns.',
+  2: 'Scene 2 adds an individual bias slider so you can test tipping points.',
+  3: 'Scene 3 adds diversity preference, so too little or too much similarity can trigger moves.',
+  4: 'Scene 4 adds population and vacancy controls on top of the diversity rule.',
+}
+
 const neighborOffsets: Position[] = [
   { row: -1, col: 0 },
   { row: 1, col: 0 },
@@ -360,6 +368,13 @@ const createSceneZeroBoard = (round: RoundConfig): Board => {
 
 const createPlayableRoundBoard = (round: RoundConfig, preference: PreferenceRule): Board => {
   if (round.id === SCENE_ZERO_ID) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const candidate = createSceneZeroBoard(round)
+      const analysis = analyzeBoard(candidate, preference)
+      if (analysis.unhappyCount > 0) {
+        return candidate
+      }
+    }
     return createSceneZeroBoard(round)
   }
 
@@ -456,7 +471,8 @@ function App() {
   const [running, setRunning] = useState(false)
   const [turns, setTurns] = useState(0)
   const [hint, setHint] = useState('Scene 0: drag the unhappy block to an empty home.')
-  const [showIntro, setShowIntro] = useState(true)
+  const [showWelcome, setShowWelcome] = useState(true)
+  const [showSceneIntro, setShowSceneIntro] = useState(false)
   const [showRoundSummary, setShowRoundSummary] = useState(false)
   const [clearedRounds, setClearedRounds] = useState<boolean[]>(Array.from({ length: ROUNDS.length }, () => false))
   const [moveTrail, setMoveTrail] = useState<{ from: string; to: string } | null>(null)
@@ -484,6 +500,7 @@ function App() {
   const sceneFourBluePercent = (sceneFourOccupiedPercent * sceneFourBlueShare) / 100
   const sceneFourOrangePercent = sceneFourOccupiedPercent - sceneFourBluePercent
   const sceneFourOrangeShare = 100 - sceneFourBlueShare
+  const sceneIntroText = SCENE_INTRO_TEXT[round.id] ?? 'Watch what changes in this scene.'
 
   useEffect(() => {
     setUnhappyStreaks((previous) => {
@@ -561,6 +578,7 @@ function App() {
       setHint(`${nextRound.label} ready.`)
     }
     setShowRoundSummary(false)
+    setShowSceneIntro(true)
     setMoveTrail(null)
     setUnhappyStreaks({})
     setDragSource(null)
@@ -653,7 +671,7 @@ function App() {
   )
 
   useEffect(() => {
-    if (!running || showIntro || showRoundSummary || sceneZeroActive) {
+    if (!running || showWelcome || showSceneIntro || showRoundSummary || sceneZeroActive) {
       return
     }
 
@@ -662,7 +680,7 @@ function App() {
     }, STEP_DELAY_MS)
 
     return () => window.clearTimeout(timer)
-  }, [board, runStep, running, sceneZeroActive, showIntro, showRoundSummary])
+  }, [board, runStep, running, sceneZeroActive, showSceneIntro, showWelcome, showRoundSummary])
 
   const goToNextRound = (): void => {
     if (roundIndex >= ROUNDS.length - 1) {
@@ -681,7 +699,7 @@ function App() {
           <button
             type="button"
             onClick={() => {
-              setShowIntro(true)
+              setShowSceneIntro(true)
               setRunning(false)
             }}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
@@ -1021,22 +1039,45 @@ function App() {
         </div>
       </section>
 
-      {showIntro && (
+      {showWelcome && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">How It Works</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-900">Watch Sorting Happen</h2>
-            <p className="mt-2 text-sm text-slate-700">Scene 0 is manual: drag the pulsing household to any empty home until everyone is happy.</p>
-            <p className="mt-2 text-sm text-slate-700">Scenes 1-2 start random. Unhappy households pulse, then relocate into empty homes.</p>
-            <p className="mt-2 text-sm text-slate-700">Scenes 3-4 start segregated and add a diversity range so too little or too much similarity can trigger moves.</p>
-            <p className="mt-2 text-sm text-slate-700">Keep segregation at or below the target while getting unhappy households to 0.</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Welcome</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">Block 'Burb</h2>
+            <p className="mt-2 text-sm text-slate-700">Block 'Burb lets you explore how neighborhood preferences shape city patterns.</p>
+            <p className="mt-2 text-sm text-slate-700">Small local choices can produce big collective outcomes.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowWelcome(false)
+                setShowSceneIntro(true)
+                setRunning(false)
+              }}
+              className="mt-3 w-full rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white"
+            >
+              Start
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showSceneIntro && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{round.label}</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-900">What&apos;s New</h2>
+            <p className="mt-2 text-sm text-slate-700">{sceneIntroText}</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => {
-                  setShowIntro(false)
+                  setShowSceneIntro(false)
                   setRunning(false)
-                  setHint('Use Start to watch movement unfold.')
+                  if (sceneZeroActive) {
+                    setHint('Scene 0: drag the unhappy block to an empty home.')
+                  } else {
+                    setHint(`${round.label} ready.`)
+                  }
                 }}
                 className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
@@ -1045,7 +1086,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => {
-                  setShowIntro(false)
+                  setShowSceneIntro(false)
                   if (sceneZeroActive) {
                     setRunning(false)
                     setHint('Scene 0: drag the unhappy block to an empty home.')
