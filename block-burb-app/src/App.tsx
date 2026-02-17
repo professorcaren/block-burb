@@ -32,13 +32,22 @@ interface StepResult {
   target?: Position
 }
 
+interface PreferenceRule {
+  minLike: number
+  maxLike: number
+}
+
 const BOARD_SIZE = 8
 const STEP_DELAY_MS = 360
 const GITHUB_REPO_URL = 'https://github.com/professorcaren/block-burb'
-const ROUND_TWO_ID = 2
-const ROUND_TWO_MIN_BIAS = 20
-const ROUND_TWO_MAX_BIAS = 60
-const ROUND_TWO_DEFAULT_BIAS = 33
+const SCENE_TWO_ID = 2
+const SCENE_TWO_MIN_BIAS = 20
+const SCENE_TWO_MAX_BIAS = 60
+const SCENE_TWO_DEFAULT_BIAS = 33
+const SCENE_THREE_ID = 3
+const SCENE_THREE_MIN_DEFAULT = 10
+const SCENE_THREE_MAX_DEFAULT = 80
+const SCENE_THREE_MIN_GAP = 5
 
 const ROUNDS: RoundConfig[] = [
   { id: 1, label: 'Scene 1', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
@@ -102,7 +111,7 @@ const createRoundBoard = (round: RoundConfig): Board => {
 
 const cloneBoard = (board: Board): Board => board.map((row) => [...row])
 
-const analyzeBoard = (board: Board, tolerance: number): BoardAnalysis => {
+const analyzeBoard = (board: Board, preference: PreferenceRule): BoardAnalysis => {
   let unhappyCount = 0
   let totalAgents = 0
   let sameAdjacency = 0
@@ -138,7 +147,11 @@ const analyzeBoard = (board: Board, tolerance: number): BoardAnalysis => {
         }
       }
 
-      if (occupiedNeighbors > 0 && sameColorNeighbors / occupiedNeighbors < tolerance) {
+      const sameRatio = occupiedNeighbors === 0 ? 0 : sameColorNeighbors / occupiedNeighbors
+      if (
+        occupiedNeighbors > 0
+        && (sameRatio < preference.minLike || sameRatio > preference.maxLike)
+      ) {
         unhappyCount += 1
         unhappyKeys.add(keyFor({ row, col }))
       }
@@ -174,22 +187,84 @@ const minimumUnhappyForRound = (round: RoundConfig): number => {
   if (round.id === 1) {
     return 1
   }
-  if (round.id === ROUND_TWO_ID) {
+  if (round.id === SCENE_TWO_ID) {
     return Math.max(6, Math.round((round.blueCount + round.orangeCount) * 0.12))
   }
   return Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
 }
 
-const toleranceForRound = (round: RoundConfig, roundTwoBias: number): number =>
-  round.id === ROUND_TWO_ID ? roundTwoBias / 100 : round.tolerance
+const preferenceForRound = (
+  round: RoundConfig,
+  roundTwoBias: number,
+  sceneThreeMinLike: number,
+  sceneThreeMaxLike: number,
+): PreferenceRule => {
+  if (round.id === SCENE_TWO_ID) {
+    return { minLike: roundTwoBias / 100, maxLike: 1 }
+  }
 
-const createPlayableRoundBoard = (round: RoundConfig, tolerance: number): Board => {
+  if (round.id === SCENE_THREE_ID) {
+    return { minLike: sceneThreeMinLike / 100, maxLike: sceneThreeMaxLike / 100 }
+  }
+
+  return { minLike: round.tolerance, maxLike: 1 }
+}
+
+const createSegregatedSceneBoard = (round: RoundConfig): Board => {
+  const board = Array.from({ length: BOARD_SIZE }, () =>
+    Array.from({ length: BOARD_SIZE }, () => null as Cell),
+  )
+  const leftZone: Position[] = []
+  const rightZone: Position[] = []
+  const split = Math.floor(BOARD_SIZE / 2)
+
+  for (let row = 0; row < BOARD_SIZE; row += 1) {
+    for (let col = 0; col < BOARD_SIZE; col += 1) {
+      if (col < split) {
+        leftZone.push({ row, col })
+      } else {
+        rightZone.push({ row, col })
+      }
+    }
+  }
+
+  const bluePrimary = shuffle(leftZone)
+  const orangePrimary = shuffle(rightZone)
+  const blueOverflow = shuffle(rightZone)
+  const orangeOverflow = shuffle(leftZone)
+
+  const fill = (positions: Position[], count: number, color: AgentColor): number => {
+    let placed = 0
+    for (let index = 0; index < positions.length && placed < count; index += 1) {
+      const cell = positions[index]
+      if (board[cell.row][cell.col] === null) {
+        board[cell.row][cell.col] = color
+        placed += 1
+      }
+    }
+    return count - placed
+  }
+
+  const blueRemaining = fill(bluePrimary, round.blueCount, 'blue')
+  fill(blueOverflow, blueRemaining, 'blue')
+
+  const orangeRemaining = fill(orangePrimary, round.orangeCount, 'orange')
+  fill(orangeOverflow, orangeRemaining, 'orange')
+
+  return board
+}
+
+const createPlayableRoundBoard = (round: RoundConfig, preference: PreferenceRule): Board => {
+  if (round.id === SCENE_THREE_ID) {
+    return createSegregatedSceneBoard(round)
+  }
+
   let firstCandidate: Board | null = null
   let firstUnhappyCandidate: Board | null = null
 
   for (let attempt = 0; attempt < 120; attempt += 1) {
     const candidate = createRoundBoard(round)
-    const analysis = analyzeBoard(candidate, tolerance)
+    const analysis = analyzeBoard(candidate, preference)
     if (firstCandidate === null) {
       firstCandidate = candidate
     }
@@ -224,8 +299,8 @@ const collectUnhappy = (analysis: BoardAnalysis): Position[] =>
     return { row, col }
   })
 
-const moveOneUnhappy = (board: Board, tolerance: number): StepResult => {
-  const analysis = analyzeBoard(board, tolerance)
+const moveOneUnhappy = (board: Board, preference: PreferenceRule): StepResult => {
+  const analysis = analyzeBoard(board, preference)
   const unhappy = collectUnhappy(analysis)
   const vacancies = collectVacancies(board)
 
@@ -257,9 +332,14 @@ const isRoundCompleted = (analysis: BoardAnalysis, round: RoundConfig): boolean 
 
 function App() {
   const [roundIndex, setRoundIndex] = useState(0)
-  const [roundTwoBias, setRoundTwoBias] = useState(ROUND_TWO_DEFAULT_BIAS)
+  const [roundTwoBias, setRoundTwoBias] = useState(SCENE_TWO_DEFAULT_BIAS)
+  const [sceneThreeMinLike, setSceneThreeMinLike] = useState(SCENE_THREE_MIN_DEFAULT)
+  const [sceneThreeMaxLike, setSceneThreeMaxLike] = useState(SCENE_THREE_MAX_DEFAULT)
   const [board, setBoard] = useState<Board>(() =>
-    createPlayableRoundBoard(ROUNDS[0], toleranceForRound(ROUNDS[0], ROUND_TWO_DEFAULT_BIAS)),
+    createPlayableRoundBoard(
+      ROUNDS[0],
+      preferenceForRound(ROUNDS[0], SCENE_TWO_DEFAULT_BIAS, SCENE_THREE_MIN_DEFAULT, SCENE_THREE_MAX_DEFAULT),
+    ),
   )
   const [running, setRunning] = useState(false)
   const [turns, setTurns] = useState(0)
@@ -272,8 +352,11 @@ function App() {
 
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
-  const effectiveTolerance = toleranceForRound(round, roundTwoBias)
-  const analysis = useMemo(() => analyzeBoard(board, effectiveTolerance), [board, effectiveTolerance])
+  const effectivePreference = useMemo(
+    () => preferenceForRound(round, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike),
+    [round, roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike],
+  )
+  const analysis = useMemo(() => analyzeBoard(board, effectivePreference), [board, effectivePreference])
   const completed = turns > 0 && isRoundCompleted(analysis, round)
   const segregationAlert = analysis.segregation > round.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
@@ -323,31 +406,39 @@ function App() {
   const resetRound = useCallback((): void => {
     setRunning(false)
     setTurns(0)
-    setBoard(createPlayableRoundBoard(round, effectiveTolerance))
-    setHint('Random start loaded. Watch the pulse, then move.')
+    setBoard(createPlayableRoundBoard(round, effectivePreference))
+    if (round.id === SCENE_THREE_ID) {
+      setHint('Segregated start loaded. Press Play to watch reshuffling.')
+    } else {
+      setHint('Random start loaded. Watch the pulse, then move.')
+    }
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [effectiveTolerance, round])
+  }, [effectivePreference, round])
 
   const loadRound = useCallback((index: number): void => {
     const nextRound = ROUNDS[index]
-    const nextTolerance = toleranceForRound(nextRound, roundTwoBias)
+    const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
     setRoundIndex(index)
     setRunning(false)
     setTurns(0)
-    setBoard(createPlayableRoundBoard(nextRound, nextTolerance))
-    setHint(`${nextRound.label} ready.`)
+    setBoard(createPlayableRoundBoard(nextRound, nextPreference))
+    if (nextRound.id === SCENE_THREE_ID) {
+      setHint(`${nextRound.label} starts segregated. Press Play.`)
+    } else {
+      setHint(`${nextRound.label} ready.`)
+    }
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [roundTwoBias])
+  }, [roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike])
 
   const runStep = useCallback(
     (fromAuto = false): boolean => {
-      const step = moveOneUnhappy(board, effectiveTolerance)
+      const step = moveOneUnhappy(board, effectivePreference)
       if (!step.moved || !step.source || !step.target) {
         setRunning(false)
         if (analysis.unhappyCount === 0) {
@@ -362,7 +453,7 @@ function App() {
       setTurns((value) => value + 1)
       setMoveTrail({ from: keyFor(step.source), to: keyFor(step.target) })
 
-      const nextAnalysis = analyzeBoard(step.board, effectiveTolerance)
+      const nextAnalysis = analyzeBoard(step.board, effectivePreference)
       if (nextAnalysis.unhappyCount === 0) {
         if (nextAnalysis.segregation <= round.targetSegregation) {
           setHint('Everyone is happy and segregation stayed low.')
@@ -378,7 +469,7 @@ function App() {
 
       return true
     },
-    [analysis.unhappyCount, board, effectiveTolerance, round.targetSegregation, segregationAlert],
+    [analysis.unhappyCount, board, effectivePreference, round.targetSegregation, segregationAlert],
   )
 
   useEffect(() => {
@@ -472,7 +563,7 @@ function App() {
           </div>
         </div>
 
-        {round.id === ROUND_TWO_ID && (
+        {round.id === SCENE_TWO_ID && (
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-2">
             <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
               <span>Bias Slider</span>
@@ -480,8 +571,8 @@ function App() {
             </div>
             <input
               type="range"
-              min={ROUND_TWO_MIN_BIAS}
-              max={ROUND_TWO_MAX_BIAS}
+              min={SCENE_TWO_MIN_BIAS}
+              max={SCENE_TWO_MAX_BIAS}
               step={1}
               value={roundTwoBias}
               onChange={(event) => {
@@ -492,6 +583,62 @@ function App() {
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
             />
+          </div>
+        )}
+
+        {round.id === SCENE_THREE_ID && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
+              <span>Diversity Range</span>
+              <span>{sceneThreeMinLike}% - {sceneThreeMaxLike}% alike</span>
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-800/90">
+              <span>Minimum alike</span>
+              <span>{sceneThreeMinLike}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={60}
+              step={1}
+              value={sceneThreeMinLike}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                const bounded = Math.min(value, sceneThreeMaxLike - SCENE_THREE_MIN_GAP)
+                setSceneThreeMinLike(bounded)
+                setRunning(false)
+                setHint(`Scene 3 range: ${bounded}% to ${sceneThreeMaxLike}% alike.`)
+              }}
+              className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
+            />
+            <div className="mt-2 flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-800/90">
+              <span>Maximum alike</span>
+              <span>{sceneThreeMaxLike}%</span>
+            </div>
+            <input
+              type="range"
+              min={40}
+              max={100}
+              step={1}
+              value={sceneThreeMaxLike}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                const bounded = Math.max(value, sceneThreeMinLike + SCENE_THREE_MIN_GAP)
+                setSceneThreeMaxLike(bounded)
+                setRunning(false)
+                setHint(`Scene 3 range: ${sceneThreeMinLike}% to ${bounded}% alike.`)
+              }}
+              className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
+            />
+            <div className="relative mt-2 h-2 rounded-full bg-slate-200">
+              <span
+                className="absolute inset-y-0 rounded-full bg-emerald-500/75"
+                style={{
+                  left: `${sceneThreeMinLike}%`,
+                  right: `${100 - sceneThreeMaxLike}%`,
+                }}
+              />
+            </div>
           </div>
         )}
 
@@ -561,7 +708,8 @@ function App() {
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">How It Works</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Watch Sorting Happen</h2>
-            <p className="mt-2 text-sm text-slate-700">The board starts random. Unhappy households pulse, then relocate into empty homes.</p>
+            <p className="mt-2 text-sm text-slate-700">Scenes 1-2 start random. Unhappy households pulse, then relocate into empty homes.</p>
+            <p className="mt-2 text-sm text-slate-700">Scene 3 starts segregated and adds a diversity range so too little or too much similarity can trigger moves.</p>
             <p className="mt-2 text-sm text-slate-700">Keep segregation at or below the target while getting unhappy households to 0.</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
