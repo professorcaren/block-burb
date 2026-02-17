@@ -44,7 +44,7 @@ const SCENE_ZERO_ID = 0
 const SCENE_TWO_ID = 2
 const SCENE_TWO_MIN_BIAS = 20
 const SCENE_TWO_MAX_BIAS = 60
-const SCENE_TWO_DEFAULT_BIAS = 33
+const SCENE_TWO_DEFAULT_BIAS = 52
 const SCENE_THREE_ID = 3
 const SCENE_THREE_MIN_DEFAULT = 10
 const SCENE_THREE_MAX_DEFAULT = 80
@@ -746,12 +746,18 @@ function App() {
                 const isDragTarget = dragTargetKey === key
                 const pulseClass = !unhappy
                   ? ''
-                  : streak >= 7
-                    ? 'unhappy-pulse-strong'
-                    : streak >= 4
-                      ? 'unhappy-pulse-medium'
-                      : 'unhappy-pulse-light'
-                const unhappyGlowClass = unhappy ? 'ring-2 ring-rose-400/70 ring-offset-1' : ''
+                  : sceneZeroActive
+                    ? 'unhappy-pulse-scene0'
+                    : streak >= 7
+                      ? 'unhappy-pulse-strong'
+                      : streak >= 4
+                        ? 'unhappy-pulse-medium'
+                        : 'unhappy-pulse-light'
+                const unhappyGlowClass = !unhappy
+                  ? ''
+                  : sceneZeroActive
+                    ? 'ring-4 ring-rose-500/90 ring-offset-1'
+                    : 'ring-2 ring-rose-400/70 ring-offset-1'
                 const trailClass = moveTrail && (moveTrail.from === key || moveTrail.to === key) ? 'trail-glow tile-pop' : ''
                 const dragClass = isSource
                   ? 'ring-2 ring-slate-900 ring-offset-1'
@@ -791,7 +797,16 @@ function App() {
                       }
                       setDragTargetKey(null)
                     }}
-                  />
+                  >
+                    {unhappy && (
+                      <span className="pointer-events-none absolute -right-1 -top-1 inline-flex h-3.5 w-3.5">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500/70" />
+                        <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rose-600 shadow-[0_0_0_2px_rgba(255,255,255,0.95)]">
+                          <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 )
               }),
             )}
