@@ -48,11 +48,15 @@ const SCENE_THREE_ID = 3
 const SCENE_THREE_MIN_DEFAULT = 10
 const SCENE_THREE_MAX_DEFAULT = 80
 const SCENE_THREE_MIN_GAP = 5
+const SCENE_FOUR_ID = 4
+const SCENE_FOUR_DEFAULT_BLUE_SHARE = 50
+const SCENE_FOUR_EMPTY_PERCENT = 20
 
 const ROUNDS: RoundConfig[] = [
   { id: 1, label: 'Scene 1', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
   { id: 2, label: 'Scene 2', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
   { id: 3, label: 'Scene 3', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
+  { id: 4, label: 'Scene 4', tolerance: 0.56, targetSegregation: 52, blueCount: 25, orangeCount: 25 },
 ]
 
 const neighborOffsets: Position[] = [
@@ -77,6 +81,7 @@ const inBounds = (row: number, col: number): boolean =>
   row >= 0 && col >= 0 && row < BOARD_SIZE && col < BOARD_SIZE
 
 const keyFor = (position: Position): string => `${position.row}:${position.col}`
+const isDiversityScene = (sceneId: number): boolean => sceneId === SCENE_THREE_ID || sceneId === SCENE_FOUR_ID
 
 const shuffle = <T,>(items: T[]): T[] => {
   const copy = [...items]
@@ -193,6 +198,28 @@ const minimumUnhappyForRound = (round: RoundConfig): number => {
   return Math.max(4, Math.round((round.blueCount + round.orangeCount) * 0.1))
 }
 
+const roundWithComposition = (
+  round: RoundConfig,
+  blueSharePercent: number,
+  emptyPercent: number,
+): RoundConfig => {
+  if (round.id !== SCENE_FOUR_ID) {
+    return round
+  }
+
+  const totalCells = BOARD_SIZE * BOARD_SIZE
+  const targetOccupied = Math.max(2, Math.round(((100 - emptyPercent) / 100) * totalCells))
+  const occupied = targetOccupied % 2 === 0 ? targetOccupied : targetOccupied - 1
+  const blueCount = Math.max(1, Math.min(occupied - 1, Math.round((blueSharePercent / 100) * occupied)))
+  const orangeCount = Math.max(1, occupied - blueCount)
+
+  return {
+    ...round,
+    blueCount,
+    orangeCount,
+  }
+}
+
 const preferenceForRound = (
   round: RoundConfig,
   roundTwoBias: number,
@@ -203,7 +230,7 @@ const preferenceForRound = (
     return { minLike: roundTwoBias / 100, maxLike: 1 }
   }
 
-  if (round.id === SCENE_THREE_ID) {
+  if (isDiversityScene(round.id)) {
     return { minLike: sceneThreeMinLike / 100, maxLike: sceneThreeMaxLike / 100 }
   }
 
@@ -255,7 +282,7 @@ const createSegregatedSceneBoard = (round: RoundConfig): Board => {
 }
 
 const createPlayableRoundBoard = (round: RoundConfig, preference: PreferenceRule): Board => {
-  if (round.id === SCENE_THREE_ID) {
+  if (isDiversityScene(round.id)) {
     return createSegregatedSceneBoard(round)
   }
 
@@ -335,6 +362,7 @@ function App() {
   const [roundTwoBias, setRoundTwoBias] = useState(SCENE_TWO_DEFAULT_BIAS)
   const [sceneThreeMinLike, setSceneThreeMinLike] = useState(SCENE_THREE_MIN_DEFAULT)
   const [sceneThreeMaxLike, setSceneThreeMaxLike] = useState(SCENE_THREE_MAX_DEFAULT)
+  const [sceneFourBlueShare, setSceneFourBlueShare] = useState(SCENE_FOUR_DEFAULT_BLUE_SHARE)
   const [board, setBoard] = useState<Board>(() =>
     createPlayableRoundBoard(
       ROUNDS[0],
@@ -352,15 +380,23 @@ function App() {
 
   const completionShownRef = useRef(false)
   const round = ROUNDS[roundIndex]
+  const activeRound = useMemo(
+    () => roundWithComposition(round, sceneFourBlueShare, SCENE_FOUR_EMPTY_PERCENT),
+    [round, sceneFourBlueShare],
+  )
   const effectivePreference = useMemo(
-    () => preferenceForRound(round, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike),
-    [round, roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike],
+    () => preferenceForRound(activeRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike),
+    [activeRound, roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike],
   )
   const analysis = useMemo(() => analyzeBoard(board, effectivePreference), [board, effectivePreference])
-  const completed = turns > 0 && isRoundCompleted(analysis, round)
-  const segregationAlert = analysis.segregation > round.targetSegregation
+  const completed = turns > 0 && isRoundCompleted(analysis, activeRound)
+  const segregationAlert = analysis.segregation > activeRound.targetSegregation
   const segregationNeedleLeft = Math.max(2, Math.min(98, analysis.segregation))
-  const targetMarkerLeft = Math.max(2, Math.min(98, round.targetSegregation))
+  const targetMarkerLeft = Math.max(2, Math.min(98, activeRound.targetSegregation))
+  const sceneFourOccupiedPercent = 100 - SCENE_FOUR_EMPTY_PERCENT
+  const sceneFourBluePercent = (sceneFourOccupiedPercent * sceneFourBlueShare) / 100
+  const sceneFourOrangePercent = sceneFourOccupiedPercent - sceneFourBluePercent
+  const sceneFourOrangeShare = 100 - sceneFourBlueShare
 
   useEffect(() => {
     setUnhappyStreaks((previous) => {
@@ -406,8 +442,8 @@ function App() {
   const resetRound = useCallback((): void => {
     setRunning(false)
     setTurns(0)
-    setBoard(createPlayableRoundBoard(round, effectivePreference))
-    if (round.id === SCENE_THREE_ID) {
+    setBoard(createPlayableRoundBoard(activeRound, effectivePreference))
+    if (isDiversityScene(activeRound.id)) {
       setHint('Segregated start loaded. Press Play to watch reshuffling.')
     } else {
       setHint('Random start loaded. Watch the pulse, then move.')
@@ -416,16 +452,17 @@ function App() {
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [effectivePreference, round])
+  }, [activeRound, effectivePreference])
 
   const loadRound = useCallback((index: number): void => {
-    const nextRound = ROUNDS[index]
+    const baseRound = ROUNDS[index]
+    const nextRound = roundWithComposition(baseRound, sceneFourBlueShare, SCENE_FOUR_EMPTY_PERCENT)
     const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
     setRoundIndex(index)
     setRunning(false)
     setTurns(0)
     setBoard(createPlayableRoundBoard(nextRound, nextPreference))
-    if (nextRound.id === SCENE_THREE_ID) {
+    if (isDiversityScene(nextRound.id)) {
       setHint(`${nextRound.label} starts segregated. Press Play.`)
     } else {
       setHint(`${nextRound.label} ready.`)
@@ -434,7 +471,7 @@ function App() {
     setMoveTrail(null)
     setUnhappyStreaks({})
     completionShownRef.current = false
-  }, [roundTwoBias, sceneThreeMaxLike, sceneThreeMinLike])
+  }, [roundTwoBias, sceneFourBlueShare, sceneThreeMaxLike, sceneThreeMinLike])
 
   const runStep = useCallback(
     (fromAuto = false): boolean => {
@@ -455,7 +492,7 @@ function App() {
 
       const nextAnalysis = analyzeBoard(step.board, effectivePreference)
       if (nextAnalysis.unhappyCount === 0) {
-        if (nextAnalysis.segregation <= round.targetSegregation) {
+        if (nextAnalysis.segregation <= activeRound.targetSegregation) {
           setHint('Everyone is happy and segregation stayed low.')
         } else {
           setHint('Everyone is happy, but segregation is still high.')
@@ -469,7 +506,7 @@ function App() {
 
       return true
     },
-    [analysis.unhappyCount, board, effectivePreference, round.targetSegregation, segregationAlert],
+    [activeRound.targetSegregation, analysis.unhappyCount, board, effectivePreference, segregationAlert],
   )
 
   useEffect(() => {
@@ -586,7 +623,7 @@ function App() {
           </div>
         )}
 
-        {round.id === SCENE_THREE_ID && (
+        {isDiversityScene(round.id) && (
           <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-2">
             <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-800">
               <span>Diversity Range</span>
@@ -607,7 +644,7 @@ function App() {
                 const bounded = Math.min(value, sceneThreeMaxLike - SCENE_THREE_MIN_GAP)
                 setSceneThreeMinLike(bounded)
                 setRunning(false)
-                setHint(`Scene 3 range: ${bounded}% to ${sceneThreeMaxLike}% alike.`)
+                setHint(`${round.label} range: ${bounded}% to ${sceneThreeMaxLike}% alike.`)
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
             />
@@ -626,7 +663,7 @@ function App() {
                 const bounded = Math.max(value, sceneThreeMinLike + SCENE_THREE_MIN_GAP)
                 setSceneThreeMaxLike(bounded)
                 setRunning(false)
-                setHint(`Scene 3 range: ${sceneThreeMinLike}% to ${bounded}% alike.`)
+                setHint(`${round.label} range: ${sceneThreeMinLike}% to ${bounded}% alike.`)
               }}
               className="mt-1 h-2 w-full cursor-pointer accent-emerald-600"
             />
@@ -639,6 +676,51 @@ function App() {
                 }}
               />
             </div>
+          </div>
+        )}
+
+        {round.id === SCENE_FOUR_ID && (
+          <div className="mt-3 rounded-lg border border-slate-300 bg-slate-100/80 px-2 py-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-800">
+              <span>orange:blue ratio {sceneFourOrangeShare}:{sceneFourBlueShare}</span>
+              <span>empty {SCENE_FOUR_EMPTY_PERCENT}%</span>
+            </div>
+            <div className="relative mt-2 h-3 overflow-hidden rounded-full border border-slate-300 bg-slate-200">
+              <span
+                className="absolute inset-y-0 left-0 bg-[#d97a2f]"
+                style={{ width: `${sceneFourOrangePercent}%` }}
+              />
+              <span
+                className="absolute inset-y-0 bg-[#1f5ea8]"
+                style={{ left: `${sceneFourOrangePercent}%`, width: `${sceneFourBluePercent}%` }}
+              />
+              <span
+                className="absolute inset-y-0 right-0 bg-slate-900"
+                style={{ width: `${SCENE_FOUR_EMPTY_PERCENT}%` }}
+              />
+            </div>
+            <input
+              type="range"
+              min={20}
+              max={80}
+              step={1}
+              value={sceneFourBlueShare}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setSceneFourBlueShare(value)
+                setRunning(false)
+                setTurns(0)
+                const nextRound = roundWithComposition(round, value, SCENE_FOUR_EMPTY_PERCENT)
+                const nextPreference = preferenceForRound(nextRound, roundTwoBias, sceneThreeMinLike, sceneThreeMaxLike)
+                setBoard(createPlayableRoundBoard(nextRound, nextPreference))
+                setShowRoundSummary(false)
+                setMoveTrail(null)
+                setUnhappyStreaks({})
+                completionShownRef.current = false
+                setHint(`Scene 4 mix set to ${100 - value}:${value} with ${SCENE_FOUR_EMPTY_PERCENT}% empty.`)
+              }}
+              className="mt-2 h-2 w-full cursor-pointer accent-slate-700"
+            />
           </div>
         )}
 
@@ -709,7 +791,7 @@ function App() {
             <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">How It Works</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">Watch Sorting Happen</h2>
             <p className="mt-2 text-sm text-slate-700">Scenes 1-2 start random. Unhappy households pulse, then relocate into empty homes.</p>
-            <p className="mt-2 text-sm text-slate-700">Scene 3 starts segregated and adds a diversity range so too little or too much similarity can trigger moves.</p>
+            <p className="mt-2 text-sm text-slate-700">Scenes 3-4 start segregated and add a diversity range so too little or too much similarity can trigger moves.</p>
             <p className="mt-2 text-sm text-slate-700">Keep segregation at or below the target while getting unhappy households to 0.</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button
