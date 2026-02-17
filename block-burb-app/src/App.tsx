@@ -41,9 +41,9 @@ const ROUND_TWO_MAX_BIAS = 60
 const ROUND_TWO_DEFAULT_BIAS = 33
 
 const ROUNDS: RoundConfig[] = [
-  { id: 1, label: 'Start', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
-  { id: 2, label: 'Mid', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
-  { id: 3, label: 'Hard', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
+  { id: 1, label: 'Scene 1', tolerance: 0.26, targetSegregation: 60, blueCount: 24, orangeCount: 20 },
+  { id: 2, label: 'Scene 2', tolerance: 0.33, targetSegregation: 56, blueCount: 25, orangeCount: 21 },
+  { id: 3, label: 'Scene 3', tolerance: 0.56, targetSegregation: 52, blueCount: 26, orangeCount: 22 },
 ]
 
 const neighborOffsets: Position[] = [
@@ -338,7 +338,7 @@ function App() {
     setRunning(false)
     setTurns(0)
     setBoard(createPlayableRoundBoard(nextRound, nextTolerance))
-    setHint(`${nextRound.label} layout ready.`)
+    setHint(`${nextRound.label} ready.`)
     setShowRoundSummary(false)
     setMoveTrail(null)
     setUnhappyStreaks({})
@@ -396,7 +396,7 @@ function App() {
   const goToNextRound = (): void => {
     if (roundIndex >= ROUNDS.length - 1) {
       setShowRoundSummary(false)
-      setHint('All rounds cleared. Remix or replay any round.')
+      setHint('All scenes cleared. Remix or replay any scene.')
       return
     }
     loadRound(roundIndex + 1)
@@ -446,36 +446,6 @@ function App() {
           </div>
         </div>
 
-        <p className="mt-2 text-center text-[11px] text-slate-600">
-          Round {round.id}: {round.label} • tolerance {Math.round(effectiveTolerance * 100)}% • target ≤ {round.targetSegregation}%
-        </p>
-
-        {round.id === ROUND_TWO_ID && (
-          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-2">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
-              <span>Bias Slider</span>
-              <span>{roundTwoBias}%</span>
-            </div>
-            <input
-              type="range"
-              min={ROUND_TWO_MIN_BIAS}
-              max={ROUND_TWO_MAX_BIAS}
-              step={1}
-              value={roundTwoBias}
-              onChange={(event) => {
-                const value = Number(event.target.value)
-                setRoundTwoBias(value)
-                setRunning(false)
-                setHint(`Round 2 bias set to ${value}%. Remix or press Play.`)
-              }}
-              className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
-            />
-            <p className="mt-1 text-[11px] text-amber-900">
-              Small individual bias can create big collective segregation. Adjust the slider and watch what emerges.
-            </p>
-          </div>
-        )}
-
         <div className="mt-3 rounded-xl border border-slate-200 bg-[#f3f6fb] p-2">
           <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${BOARD_SIZE}, minmax(0, 1fr))` }}>
             {board.flatMap((row, rowIndex) =>
@@ -501,6 +471,29 @@ function App() {
             )}
           </div>
         </div>
+
+        {round.id === ROUND_TWO_ID && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+              <span>Bias Slider</span>
+              <span>{roundTwoBias}%</span>
+            </div>
+            <input
+              type="range"
+              min={ROUND_TWO_MIN_BIAS}
+              max={ROUND_TWO_MAX_BIAS}
+              step={1}
+              value={roundTwoBias}
+              onChange={(event) => {
+                const value = Number(event.target.value)
+                setRoundTwoBias(value)
+                setRunning(false)
+                setHint(`Scene 2 bias set to ${value}%. Remix or press Play.`)
+              }}
+              className="mt-1 h-2 w-full cursor-pointer accent-amber-600"
+            />
+          </div>
+        )}
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           <button
@@ -601,7 +594,7 @@ function App() {
       {showRoundSummary && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/45 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-white/80 bg-white p-4 shadow-xl">
-            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Round Complete</p>
+            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Scene Complete</p>
             <h2 className="mt-1 text-lg font-semibold text-slate-900">{round.label} cleared in {turns} turns</h2>
             <p className="mt-2 text-sm text-slate-700">
               Final segregation: <span className={segregationAlert ? 'font-semibold text-rose-700' : 'font-semibold text-emerald-700'}>{analysis.segregation}%</span>
@@ -620,7 +613,7 @@ function App() {
                 onClick={goToNextRound}
                 className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white"
               >
-                {roundIndex >= ROUNDS.length - 1 ? 'Done' : 'Next Round'}
+                {roundIndex >= ROUNDS.length - 1 ? 'Done' : 'Next Scene'}
               </button>
             </div>
           </div>
